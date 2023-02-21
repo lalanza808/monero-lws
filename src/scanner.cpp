@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+ // Copyright (c) 2018-2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -37,6 +37,7 @@
 #include <cstring>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "common/error.h"                             // monero/src
 #include "crypto/crypto.h"                            // monero/src
@@ -47,6 +48,8 @@
 #include "db/data.h"
 #include "error.h"
 #include "misc_log_ex.h"             // monero/contrib/epee/include
+#include "net/http_client.h"
+#include "net/net_parse_helpers.h"
 #include "rpc/daemon_messages.h"     // monero/src
 #include "rpc/daemon_zmq.h"
 #include "rpc/json.h"
@@ -74,6 +77,8 @@ namespace lws
 
   namespace
   {
+    namespace net = epee::net_utils;
+
     constexpr const std::chrono::seconds account_poll_interval{10};
     constexpr const std::chrono::minutes block_rpc_timeout{2};
     constexpr const std::chrono::seconds send_timeout{30};
@@ -145,6 +150,71 @@ namespace lws
         MONERO_THROW(sent.error(), "Failed to send ZMQ RPC message");
       }
       return true;
+    }
+
+    void send_via_http(net::http::http_simple_client& client, boost::string_ref uri, const db::webhook_tx_confirmation& event, const net::http::fields_list& params, const std::chrono::milliseconds timeout)
+    {
+      if (uri.empty())
+        uri = "/";
+
+      const std::string& url = event.value.second.url;
+      const epee::byte_slice bytes = wire::json::to_bytes(event);
+      const net::http::http_response_info* info = nullptr;
+      if (!client.invoke(uri, "POST", std::string{bytes.begin(), bytes.end()}, timeout, std::addressof(info), params))
+      {
+        MERROR("Failed to invoke http request to  " << url);
+        return;
+      }
+
+      if (!info)
+      {
+        MERROR("Failed to invoke http request to  " << url << ", internal error (null response ptr)");
+        return;
+      }
+
+      if (info->m_response_code != 200)
+      {
+        MERROR("Failed to invoke http request to  " << url << ", wrong response code: " << info->m_response_code);
+        return;
+      }
+    }
+
+    void send_via_http(const epee::span<const db::webhook_tx_confirmation> events, const std::chrono::milliseconds timeout)
+    {
+      if (events.empty())
+        return;
+
+      net::http::url_content url{};
+      net::http::http_simple_client client{};
+
+      net::http::fields_list params;
+      params.emplace_back("Content-Type", "application/json; charset=utf-8");
+
+      for (const db::webhook_tx_confirmation& event : events)
+      {
+        if (event.value.second.url.empty() || !net::parse_url(event.value.second.url, url))
+        {
+          MERROR("Bad URL for webhook event: " << event.value.second.url);
+          continue;
+        }
+
+        const bool https = (url.schema == "https");
+        if (!https && url.schema != "http")
+        {
+          MERROR("Only http or https connections: " << event.value.second.url);
+          continue;
+        }
+
+        const net::ssl_support_t ssl_mode = https ?
+          net::ssl_support_t::e_ssl_support_enabled : net::ssl_support_t::e_ssl_support_disabled;
+        client.set_server(url.host, std::to_string(url.port), boost::none, ssl_mode);
+        if (client.connect(timeout))
+          send_via_http(client, url.uri, event, params, timeout);
+        else
+          MERROR("Unable to send webhook to " << event.value.second.url);
+
+        client.disconnect();
+      }
     }
 
     struct by_height
@@ -478,18 +548,13 @@ namespace lws
             blockchain.push_back(cryptonote::get_block_hash(block));
           } // for each block
 
-          expect<std::size_t> updated = disk.update(
+          auto updated = disk.update(
             users.front().scan_height(), epee::to_span(blockchain), epee::to_span(users)
           );
           if (!updated)
           {
             if (updated == lws::error::blockchain_reorg)
             {
-              epee::byte_stream dest{};
-              {
-                rapidjson::Writer<epee::byte_stream> out{dest};
-                cryptonote::json::toJsonValue(out, blocks[998]);
-              }
               MINFO("Blockchain reorg detected, resetting state");
               return;
             }
@@ -497,9 +562,10 @@ namespace lws
           }
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
-          if (*updated != users.size())
+          send_via_http(epee::to_span(updated->second), std::chrono::seconds{5});
+          if (updated->first != users.size())
           {
-            MWARNING("Only updated " << *updated << " account(s) out of " << users.size() << ", resetting");
+            MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");
             return;
           }
 

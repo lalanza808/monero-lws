@@ -28,6 +28,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <tuple>
 
@@ -118,7 +119,7 @@ namespace wire
       static constexpr bool is_signed() noexcept { return std::numeric_limits<T>::is_signed; }
       static constexpr T min() noexcept { return std::numeric_limits<T>::min(); }
       static constexpr T max() noexcept { return std::numeric_limits<T>::max(); }
-      static constexpr tag tag() noexcept { return V; }
+      static constexpr tag Tag() noexcept { return V; }
     };
 
     using int8 = type<std::int8_t,   tag::int8>;

@@ -62,15 +62,15 @@ namespace
     using out_limits = std::numeric_limits<U>;
     static_assert(in_limits::is_signed == out_limits::is_signed, "signs must match");
 
-    assert(map.min() <= value);
-    assert(value <= map.max());
+    assert(type.min() <= value);
+    assert(value <= type.max());
 
     static constexpr const std::size_t bits = 8 * sizeof(U);
     using buffer_type =
       boost::endian::endian_buffer<boost::endian::order::big, U, bits>;
 
     buffer_type buffer(value);
-    write_tag(bytes, type.tag());
+    write_tag(bytes, type.Tag());
     bytes.write(buffer.data(), sizeof(buffer));
   }
 

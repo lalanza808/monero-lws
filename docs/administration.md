@@ -66,6 +66,10 @@ are:
   * **modify_account_status**: `{"status": "active"|"hidden"|"inactive", "addresses":[...]}`
   * **reject_requests**: `{"type": "import"|"create", "addresses":[...]}`
   * **rescan**: `{"height":..., "addresses":[...]}`
+  * **webhook_add**: `{"type":"tx-confirmation", "address":"...", "url":"...", ...}` with optional fields:
+    * **token**: A string to be returned when the webhook is triggered
+    * **payment_id**: 16 hex characters representing a unique identifier for a transaction
+  * **webhook_delete**: `{"addresses":[...]}`
 
 where the listed object must be the `params` field above.
 
@@ -95,6 +99,60 @@ will put the listed address into the "inactive" state.
   ```bash
   monero-lws-admin accept_requests create $(monero-lws-admin list_requests | jq -j '.create? | .[]? | .address?+" "')
   ```
+
+## Webhook Add
+### Initial Request
+```json
+{
+  "auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09",
+  "params": {
+    "type": "tx-confirmation",
+    "url": "http://127.0.0.1:7000",
+    "payment_id": "df034c176eca3296",
+    "token": "1234",
+    "address": "9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j"
+  }
+}
+```
+### Initial Response
+```json
+{
+  "payment_id": "df034c176eca3296",
+  "event_id": "fa10a4db485145f1a24dc09c19a79d43",
+  "token": "1234",
+  "confirmations": 1,
+  "url": "http://127.0.0.1:7000"
+}
+```
+
+### Triggered Response (to specified URL)
+```json
+{
+  "event": "tx-confirmation",
+  "payment_id": "df034c176eca3296",
+  "token": "1234",
+  "confirmations": 1,
+  "id": "fa10a4db485145f1a24dc09c19a79d43",
+  "tx_info": {
+    "id": {
+      "high": 0,
+      "low": 5550229
+    },
+    "block": 2192100,
+    "index": 0,
+    "amount": 4949570000,
+    "timestamp": 1678324181,
+    "tx_hash": "901f9a2a919b6312131537ff6117d56ce2c0dc1f1341b845d7667299e1ef892f",
+    "tx_prefix_hash": "89685cb7acb836fde30fae8be5d8b884e92706df086960d0508e146979ef80dc",
+    "tx_public": "54c153792e47c1da8ceb3979560c424c1928b7b4a089c1c8b3ce99c563e1d240",
+    "rct_mask": "f3449407dc3721299b5309c0c336a17daeebce55165ddd447ba28bbd1f46c201",
+    "payment_id": "df034c176eca3296",
+    "unlock_time": 0,
+    "mixin_count": 15,
+    "coinbase": false
+  }
+}
+```
 
 # Debugging
 

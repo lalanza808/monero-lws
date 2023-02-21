@@ -27,9 +27,11 @@
 
 #pragma once
 
+#include <boost/optional/optional.hpp>
 #include <string>
 #include <vector>
 #include "common/expect.h" // monero/src
+#include "crypto/crypto.h" // monero/src
 #include "db/data.h"
 #include "db/storage.h"
 #include "wire/fwd.h"
@@ -67,6 +69,23 @@ namespace rpc
     db::block_id height;
   };
   void read_bytes(wire::reader&, rescan_req&);
+
+  struct webhook_add_req
+  {
+    std::string url;
+    boost::optional<std::string> token;
+    boost::optional<db::account_address> address;
+    boost::optional<crypto::hash8> payment_id;
+    boost::optional<std::uint32_t> confirmations;
+    db::webhook_type type;
+  };
+  void read_bytes(wire::reader&, webhook_add_req&);
+
+  struct webhook_delete_req
+  {
+    std::vector<db::account_address> addresses;
+  };
+  void read_bytes(wire::reader&, webhook_delete_req&);
 
 
   struct accept_requests_
@@ -121,5 +140,19 @@ namespace rpc
     expect<void> operator()(wire::writer& dest, db::storage disk, const request& req) const;
   };
   constexpr const rescan_ rescan{};
+
+  struct webhook_add_
+  {
+    using request = webhook_add_req;
+    expect<void> operator()(wire::writer& dest, db::storage disk, request&& req) const;
+  };
+  constexpr const webhook_add_ webhook_add{};
+
+  struct webhook_delete_
+  {
+    using request = webhook_delete_req;
+    expect<void> operator()(wire::writer& dest, db::storage disk, const request& req) const;
+  };
+  constexpr const webhook_delete_ webhook_delete{};
 
 }} // lws // rpc

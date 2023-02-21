@@ -695,7 +695,7 @@ namespace lws
     expect<epee::byte_slice> call_admin(std::string&& root, db::storage disk, const rpc::client&)
     {
       using request = typename E::request;
-      const expect<admin<request>> req = wire::json::from_bytes<admin<request>>(std::move(root));
+      expect<admin<request>> req = wire::json::from_bytes<admin<request>>(std::move(root));
       if (!req)
         return req.error();
 
@@ -717,7 +717,7 @@ namespace lws
       }
 
       wire::json_slice_writer dest{};
-      MONERO_CHECK(E{}(dest, std::move(disk), req->params));
+      MONERO_CHECK(E{}(dest, std::move(disk), std::move(req->params)));
       return dest.take_bytes();
     }
 
@@ -748,7 +748,9 @@ namespace lws
       {"/list_requests",         call_admin<rpc::list_requests_>,   100},
       {"/modify_account_status", call_admin<rpc::modify_account_>,  50 * 1024},
       {"/reject_requests",       call_admin<rpc::reject_requests_>, 50 * 1024},
-      {"/rescan",                call_admin<rpc::rescan_>,          50 * 1024}
+      {"/rescan",                call_admin<rpc::rescan_>,          50 * 1024},
+      {"/webhook_add",           call_admin<rpc::webhook_add_>,     50 * 1024},
+      {"/webhook_delete",        call_admin<rpc::webhook_delete_>,  50 * 1024}
     };
 
     struct by_name_

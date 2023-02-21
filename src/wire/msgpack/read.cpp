@@ -69,7 +69,7 @@ namespace
   {
     const auto matched_type = [tag] (const auto type)
     {
-      return type.tag() == tag;
+      return type.Tag() == tag;
     };
     // NOTE: This is slower than a switch but more flexible/reusable
     return boost::fusion::any(T{}, matched_type);
@@ -345,7 +345,7 @@ namespace wire
     std::size_t out = 0;
     const auto matched_type = [this, &out, next](const auto type)
     {
-      if (type.tag() == next)
+      if (type.Tag() == next)
       {
         out = integer::cast_unsigned<std::size_t>(read_endian(source_, type));
         return true;

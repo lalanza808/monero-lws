@@ -1,4 +1,4 @@
-// Copyright (c) 2018, The Monero Project
+// Copyright (c) 2018-2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -48,12 +48,15 @@
 #include "lmdb/database.h"
 #include "lmdb/error.h"
 #include "lmdb/key_stream.h"
+#include "lmdb/msgpack_table.h"
 #include "lmdb/table.h"
 #include "lmdb/util.h"
 #include "lmdb/value_stream.h"
+#include "net/net_parse_helpers.h" // monero/contrib/epee/include
 #include "span.h"
 #include "wire/filters.h"
 #include "wire/json.h"
+#include "wire/vector.h"
 
 namespace lws
 {
@@ -200,6 +203,9 @@ namespace db
     };
     constexpr const lmdb::basic_table<request, request_info> requests{
       "requests_by_type,address", (MDB_CREATE | MDB_DUPSORT), MONERO_COMPARE(request_info, address.spend_public)
+    };
+    constexpr const lmdb::msgpack_table<webhook_key, webhook_dupsort, webhook_data> webhooks{
+      "webhooks_by_account_id,payment_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<db::webhook_dupsort>
     };
 
     template<typename D>
@@ -451,6 +457,7 @@ namespace db
       MDB_dbi spends;
       MDB_dbi images;
       MDB_dbi requests;
+      MDB_dbi webhooks;
     } tables;
 
     const unsigned create_queue_max;
@@ -469,6 +476,7 @@ namespace db
       tables.spends      = spends.open(*txn).value();
       tables.images      = images.open(*txn).value();
       tables.requests    = requests.open(*txn).value();
+      tables.webhooks    = webhooks.open(*txn).value();
 
       check_blockchain(*txn, tables.blocks);
 
@@ -695,6 +703,14 @@ namespace db
     );
   }
 
+  static void write_bytes(wire::json_writer& dest, const std::pair<webhook_key, std::vector<webhook_value>>& self)
+  {
+    wire::object(dest,
+      wire::field("key", std::cref(self.first)),
+      wire::field("value", std::cref(self.second))
+    );
+  }
+
   expect<void> storage_reader::json_debug(std::ostream& out, bool show_keys)
   {
     using boost::adaptors::reverse;
@@ -713,6 +729,7 @@ namespace db
     cursor::spends spends_cur;
     cursor::images images_cur;
     cursor::requests requests_cur;
+    cursor::webhooks webhooks_cur;
 
     MONERO_CHECK(check_cursor(*txn, db->tables.blocks, curs.blocks_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.accounts, accounts_cur));
@@ -722,6 +739,7 @@ namespace db
     MONERO_CHECK(check_cursor(*txn, db->tables.spends, spends_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.images, images_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.requests, requests_cur));
+    MONERO_CHECK(check_cursor(*txn, db->tables.webhooks, webhooks_cur));
 
     auto blocks_partial =
       get_blocks<boost::container::static_vector<block_info, 12>>(*curs.blocks_cur, 0);
@@ -760,6 +778,11 @@ namespace db
     if (!requests_stream)
       return requests_stream.error();
 
+    // This list should be smaller ... ?
+    const auto webhooks_data = webhooks.get_all(*webhooks_cur);
+    if (!webhooks_data)
+      return webhooks_data.error();
+
     const wire::as_array_filter<toggle_key_output> toggle_keys_filter{{show_keys}};
     wire::json_stream_writer json_stream{out};
     wire::object(json_stream,
@@ -770,7 +793,8 @@ namespace db
       wire::field(outputs.name, wire::as_object(outputs_stream->make_range(), wire::as_integer, wire::as_array)),
       wire::field(spends.name, wire::as_object(spends_stream->make_range(), wire::as_integer, wire::as_array)),
       wire::field(images.name, wire::as_object(images_stream->make_range(), output_id_key{}, wire::as_array)),
-      wire::field(requests.name, wire::as_object(requests_stream->make_range(), wire::enum_as_string, toggle_keys_filter))
+      wire::field(requests.name, wire::as_object(requests_stream->make_range(), wire::enum_as_string, toggle_keys_filter)),
+      wire::field(webhooks.name, std::cref(*webhooks_data))
     );
     json_stream.finish();
 
@@ -1708,20 +1732,21 @@ namespace db
     }
   } // anonymous
 
-  expect<std::size_t> storage::update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> users)
+  expect<std::pair<std::size_t, std::vector<webhook_tx_confirmation>>> storage::update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> users)
   {
     if (users.empty() && chain.empty())
-      return 0;
-
+      return {std::make_pair(0, std::vector<webhook_tx_confirmation>{})};
     MONERO_PRECOND(!chain.empty());
     MONERO_PRECOND(db != nullptr);
 
-    return db->try_write([this, height, chain, users] (MDB_txn& txn) -> expect<std::size_t>
+    return db->try_write([this, height, chain, users] (MDB_txn& txn) -> expect<std::pair<std::size_t, std::vector<webhook_tx_confirmation>>>
     {
       epee::span<const crypto::hash> chain_copy{chain};
       const std::uint64_t last_update =
         lmdb::to_native(height) + chain.size() - 1;
 
+      // collect all .value() errors
+      std::pair<std::size_t, std::vector<webhook_tx_confirmation>> updated;
       if (get_checkpoints().get_max_height() <= last_update)
       {
         cursor::blocks blocks_cur;
@@ -1732,22 +1757,15 @@ namespace db
         MONERO_LMDB_CHECK(mdb_cursor_get(blocks_cur.get(), &key, &value, MDB_SET));
         MONERO_LMDB_CHECK(mdb_cursor_get(blocks_cur.get(), &key, &value, MDB_LAST_DUP));
 
-        const expect<block_info> last_block = blocks.get_value<block_info>(value);
-        if (!last_block)
-          return last_block.error();
-        if (last_block->id < height)
+        const block_info last_block = MONERO_UNWRAP(blocks.get_value<block_info>(value));
+        if (last_block.id < height)
           return {lws::error::bad_blockchain};
 
         const std::uint64_t last_same =
-          std::min(lmdb::to_native(last_block->id), last_update);
-
-        const expect<crypto::hash> hash_check =
-          do_get_block_hash(*blocks_cur, block_id(last_same));
-        if (!hash_check)
-          return hash_check.error();
+          std::min(lmdb::to_native(last_block.id), last_update);
 
         const std::uint64_t offset = last_same - lmdb::to_native(height);
-        if (*hash_check != *(chain_copy.begin() + offset))
+        if (MONERO_UNWRAP(do_get_block_hash(*blocks_cur, block_id(last_same))) != *(chain_copy.begin() + offset))
           return {lws::error::blockchain_reorg};
 
         chain_copy.remove_prefix(offset + 1);
@@ -1764,18 +1782,19 @@ namespace db
       cursor::outputs             outputs_cur;
       cursor::spends              spends_cur;
       cursor::images              images_cur;
+      cursor::webhooks            webhooks_cur;
 
       MONERO_CHECK(check_cursor(txn, this->db->tables.accounts, accounts_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.accounts_bh, accounts_bh_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.outputs, outputs_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.spends, spends_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.images, images_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.webhooks, webhooks_cur));
 
       // for bulk inserts
       boost::container::static_vector<account_lookup, 127> heights{};
       static_assert(sizeof(heights) <= 1024, "stack vector is large");
 
-      std::size_t updated = 0;
       for (auto user = users.begin() ;; ++user)
       {
         if (heights.size() == heights.capacity() || user == users.end())
@@ -1812,12 +1831,8 @@ namespace db
             continue; // to next account
           }
 
-          const expect<account_lookup> lookup =
-            accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup)>(temp_value);
-          if (!lookup)
-            return lookup.error();
-
-          status_key = lookup->status;
+          status_key =
+            accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup)>(temp_value).value().status;
           MONERO_LMDB_CHECK(mdb_cursor_get(accounts_cur.get(), &key, &value, MDB_GET_BOTH));
         }
         expect<account> existing = accounts.get_value<account>(value);
@@ -1840,10 +1855,150 @@ namespace db
         MONERO_CHECK(bulk_insert(*outputs_cur, user->id(), epee::to_span(user->outputs())));
         MONERO_CHECK(add_spends(*spends_cur, *images_cur, user->id(), epee::to_span(user->spends())));
 
-        ++updated;
+
+        webhook_key hook_key{user->id(), webhook_type::tx_confirmation};
+        key = lmdb::to_val(hook_key);
+
+        bool user_has_webhooks = true;
+        err = mdb_cursor_get(webhooks_cur.get(), &key, &value, MDB_SET_KEY);
+        const auto add_event = [&updated] (MDB_val key, MDB_val value, const output& out)
+        {
+          updated.second.emplace_back();
+          updated.second.back().key = MONERO_UNWRAP(webhooks.get_key(key));
+          updated.second.back().value = MONERO_UNWRAP(webhooks.get_value(value));
+          updated.second.back().tx_info = out;
+          updated.second.back().value.second.confirmations = 1;
+        };
+
+        for (; /*for every zero payment id */ !user->outputs().empty(); )
+        {
+          if (err)
+          {
+            if (err != MDB_NOTFOUND)
+              return {lmdb::error(err)};
+            user_has_webhooks = false;
+            break;
+          }
+          if (MONERO_UNWRAP(webhooks.get_fixed_value<MONERO_FIELD(webhook_dupsort, payment_id)>(value)) != 0)
+            break;
+
+          for (const output& out : user->outputs())
+            add_event(key, value, out);
+          MONERO_LMDB_CHECK(mdb_cursor_del(webhooks_cur.get(), 0));
+          err = mdb_cursor_get(webhooks_cur.get(), &key, &value, MDB_SET_KEY);
+        }
+
+        if (user_has_webhooks)
+        {
+          // check payment_id == x (match specific) webhooks second
+          for (const output& out : user->outputs())
+          {
+            webhook_dupsort sorter{};
+            static_assert(sizeof(sorter.payment_id) == sizeof(out.payment_id.short_), "bad memcpy");
+            std::memcpy(std::addressof(sorter.payment_id), std::addressof(out.payment_id.short_), sizeof(sorter.payment_id));
+
+            if (sorter.payment_id == 0)
+              continue; // already collected above
+
+            value = lmdb::to_val(sorter);
+            err = mdb_cursor_get(webhooks_cur.get(), &key, &value, MDB_GET_BOTH_RANGE);
+
+            for (; /* all user/payment_id==x entries */ ;)
+            {
+              if (err)
+              {
+                if (err != MDB_NOTFOUND)
+                  return {lmdb::error(err)};
+                break;
+              }
+              if (MONERO_UNWRAP(webhooks.get_fixed_value<MONERO_FIELD(webhook_dupsort, payment_id)>(value)) != sorter.payment_id)
+                break;
+              add_event(key, value, out);
+              MONERO_LMDB_CHECK(mdb_cursor_del(webhooks_cur.get(), 0));
+              value = lmdb::to_val(sorter);
+              err = mdb_cursor_get(webhooks_cur.get(), &key, &value, MDB_GET_BOTH_RANGE);
+            }
+          }
+        }
+
+        ++updated.first;
       } // ... for every account being updated ...
-      return updated;
+      return {std::move(updated)};
     });
   }
+
+  expect<void> storage::add_webhook(const webhook_type type, const account_address& address, const webhook_value& event)
+  {
+    {
+      epee::net_utils::http::url_content url{};
+      if (event.second.url.empty() || !epee::net_utils::parse_url(event.second.url, url))
+        return {error::bad_url};
+      if (url.schema != "http" && url.schema != "https")
+        return {error::bad_url};
+    }
+
+    return db->try_write([this, type, &address, &event] (MDB_txn& txn) -> expect<void>
+    {
+      cursor::accounts_by_address accounts_ba_cur;
+      cursor::webhooks            webhooks_cur;
+
+      MONERO_CHECK(check_cursor(txn, this->db->tables.accounts_ba, accounts_ba_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.webhooks, webhooks_cur));
+
+      webhook_key key{account_id::invalid, type};
+      MDB_val lmkey = lmdb::to_val(by_address_version);
+      MDB_val lmvalue = lmdb::to_val(address);
+
+      {
+        const int err = mdb_cursor_get(accounts_ba_cur.get(), &lmkey, &lmvalue, MDB_GET_BOTH);
+        if (err && err != MDB_NOTFOUND)
+          return {lmdb::error(err)};
+        if (err != MDB_NOTFOUND)
+          key.user = MONERO_UNWRAP(accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup.id)>(lmvalue));
+      }
+
+      if (key.user == account_id::invalid && type == webhook_type::tx_confirmation)
+        return {error::bad_webhook};
+
+      lmkey = lmdb::to_val(key);
+      
+
+      const epee::byte_slice value = webhooks.make_value(event.first, event.second);
+      lmvalue = MDB_val{value.size(), const_cast<void*>(static_cast<const void*>(value.data()))};
+      MONERO_LMDB_CHECK(mdb_cursor_put(webhooks_cur.get(), &lmkey, &lmvalue, 0));
+      return success();
+    });
+  }
+
+  expect<void> storage::clear_webhooks(const epee::span<const account_address> addresses)
+  {
+     if (addresses.empty())
+       return success();
+
+     return db->try_write([this, addresses] (MDB_txn& txn) -> expect<void>
+     {
+       cursor::accounts_by_address accounts_ba_cur;
+       cursor::webhooks            webhooks_cur;
+
+       MONERO_CHECK(check_cursor(txn, this->db->tables.accounts_ba, accounts_ba_cur));
+       MONERO_CHECK(check_cursor(txn, this->db->tables.webhooks, webhooks_cur));
+
+       webhook_key key{account_id::invalid, webhook_type::tx_confirmation};
+       for (const auto& address : addresses)
+       {
+         MDB_val lmkey = lmdb::to_val(by_address_version);
+         MDB_val lmvalue = lmdb::to_val(address);
+
+         MONERO_LMDB_CHECK(mdb_cursor_get(accounts_ba_cur.get(), &lmkey, &lmvalue, MDB_GET_BOTH));
+         key.user = MONERO_UNWRAP(accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup.id)>(lmvalue));
+
+         lmkey = lmdb::to_val(key);
+         MONERO_LMDB_CHECK(mdb_cursor_get(webhooks_cur.get(), &lmkey, &lmvalue, MDB_SET));
+         MONERO_LMDB_CHECK(mdb_cursor_del(webhooks_cur.get(), MDB_NODUPDATA));
+       }
+
+       return success();
+     });
+   }
 } // db
 } // lws
