@@ -67,6 +67,7 @@ namespace
     const command_line::arg_descriptor<unsigned> create_queue_max;
     const command_line::arg_descriptor<std::chrono::minutes::rep> rates_interval;
     const command_line::arg_descriptor<unsigned short> log_level;
+    const command_line::arg_descriptor<bool> disable_admin_auth;
 
     static std::string get_default_zmq()
     {
@@ -95,6 +96,7 @@ namespace
       , rest_threads{"rest-threads", "Number of threads to process REST connections", 1}
       , scan_threads{"scan-threads", "Maximum number of threads for account scanning", boost::thread::hardware_concurrency()}
       , access_controls{"access-control-origin", "Specify a whitelisted HTTP control origin domain"}
+      , disable_admin_auth{"disable-admin-auth", "Make auth field optional in HTTP-REST requests", false}
       , external_bind{"confirm-external-bind", "Allow listening for external connections", false}
       , create_queue_max{"create-queue-max", "Set pending create account requests maximum", 10000}
       , rates_interval{"exchange-rate-interval", "Retrieve exchange rates in minute intervals from cryptocompare.com if greater than 0", 0}
@@ -115,6 +117,7 @@ namespace
       command_line::add_arg(description, rest_threads);
       command_line::add_arg(description, scan_threads);
       command_line::add_arg(description, access_controls);
+      command_line::add_arg(description, disable_admin_auth);
       command_line::add_arg(description, external_bind);
       command_line::add_arg(description, create_queue_max);
       command_line::add_arg(description, rates_interval);
@@ -177,7 +180,8 @@ namespace
         {command_line::get_arg(args, opts.rest_ssl_key), command_line::get_arg(args, opts.rest_ssl_cert)},
         command_line::get_arg(args, opts.access_controls),
         command_line::get_arg(args, opts.rest_threads),
-        command_line::get_arg(args, opts.external_bind)
+        command_line::get_arg(args, opts.external_bind),
+        command_line::get_arg(args, opts.disable_admin_auth)
       },
       command_line::get_arg(args, opts.daemon_rpc),
       command_line::get_arg(args, opts.daemon_sub),

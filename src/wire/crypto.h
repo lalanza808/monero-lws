@@ -30,8 +30,18 @@
 #include <type_traits>
 
 #include "crypto/crypto.h"   // monero/src
+#include "span.h"            // monero/contrib/include
 #include "ringct/rctTypes.h" // monero/src
 #include "wire/traits.h"
+
+namespace crypto
+{
+  template<typename R>
+  void read_bytes(R& source, crypto::secret_key& self)
+  {
+    source.binary(epee::as_mut_byte_span(unwrap(unwrap(self))));
+  }
+}
 
 namespace wire
 {
