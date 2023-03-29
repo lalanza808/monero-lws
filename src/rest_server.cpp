@@ -656,7 +656,7 @@ namespace lws
     };
 
     template<typename E>
-    expect<epee::byte_slice> call(std::string&& root, db::storage disk, const rpc::client& gclient)
+    expect<epee::byte_slice> call(std::string&& root, db::storage disk, const rpc::client& gclient, const bool)
     {
       using request = typename E::request;
       using response = typename E::response;
@@ -675,33 +675,35 @@ namespace lws
     struct admin
     {
       T params;
-      crypto::secret_key auth;
+      boost::optional<crypto::secret_key> auth;
     };
 
     template<typename T>
     void read_bytes(wire::json_reader& source, admin<T>& self)
     {
-      wire::object(
-        source, wire::field("auth", std::ref(unwrap(unwrap(self.auth)))), WIRE_FIELD(params)
-      );
+        wire::object(source, WIRE_OPTIONAL_FIELD(auth), WIRE_FIELD(params));
     }
     void read_bytes(wire::json_reader& source, admin<expect<void>>& self)
     {
-      // params optional
-      wire::object(source, wire::field("auth", std::ref(unwrap(unwrap(self.auth)))));
+        // params optional
+        wire::object(source, WIRE_OPTIONAL_FIELD(auth));
     }
 
     template<typename E>
-    expect<epee::byte_slice> call_admin(std::string&& root, db::storage disk, const rpc::client&)
+    expect<epee::byte_slice> call_admin(std::string&& root, db::storage disk, const rpc::client&, const bool disable_auth)
     {
       using request = typename E::request;
       expect<admin<request>> req = wire::json::from_bytes<admin<request>>(std::move(root));
       if (!req)
         return req.error();
 
+      if (!disable_auth)
       {
+        if (!req->auth)
+          return {error::account_not_found};
+
         db::account_address address{};
-        if (!crypto::secret_key_to_public_key(req->auth, address.view_public))
+        if (!crypto::secret_key_to_public_key(*(req->auth), address.view_public))
           return {error::crypto_failure};
 
         auto reader = disk.start_read();
@@ -724,7 +726,7 @@ namespace lws
     struct endpoint
     {
       char const* const name;
-      expect<epee::byte_slice> (*const run)(std::string&&, db::storage, rpc::client const&);
+      expect<epee::byte_slice> (*const run)(std::string&&, db::storage, rpc::client const&, bool);
       const unsigned max_size;
     };
 
@@ -783,13 +785,15 @@ namespace lws
     rpc::client client;
     boost::optional<std::string> prefix;
     boost::optional<std::string> admin_prefix;
+    bool disable_auth;
 
-    explicit internal(boost::asio::io_service& io_service, lws::db::storage disk, rpc::client client)
+    explicit internal(boost::asio::io_service& io_service, lws::db::storage disk, rpc::client client, const bool disable_auth)
       : lws::http_server_impl_base<rest_server::internal, context>(io_service)
       , disk(std::move(disk))
       , client(std::move(client))
       , prefix()
       , admin_prefix()
+      , disable_auth(disable_auth)
     {
       assert(std::is_sorted(std::begin(endpoints), std::end(endpoints), by_name));
     }
@@ -855,7 +859,7 @@ namespace lws
       }
 
       // \TODO remove copy of json string here :/
-      auto body = handler->run(std::string{query.m_body}, disk.clone(), client);
+      auto body = handler->run(std::string{query.m_body}, disk.clone(), client, disable_auth);
       if (!body)
       {
         MINFO(body.error().message() << " from " << ctx.m_remote_address.str() << " on " << handler->name);
@@ -986,13 +990,13 @@ namespace lws
     bool any_ssl = false;
     for (const std::string& address : addresses)
     {
-      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()));
+      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), config.disable_admin_auth);
       any_ssl |= init_port(ports_.back(), address, config, false);
     }
 
     for (const std::string& address : admin)
     {
-      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()));
+      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), config.disable_admin_auth);
       any_ssl |= init_port(ports_.back(), address, config, true);
     }
 
