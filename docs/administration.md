@@ -45,7 +45,7 @@ to put the account into the "inactive" state. Deleting accounts is not
 currently supported.
 
 Every admin REST request must be a `POST` that contains a JSON object with
-an `auth` field and an optional `params` field:
+an `auth` field (in default settings) and an optional `params` field:
 
 ```json
 {
@@ -53,7 +53,9 @@ an `auth` field and an optional `params` field:
   "params":{...}
  }
 ```
-where the `params` object is specified below.
+where the `params` object is specified below. The `auth` field can be omitted
+if `--disable-admin-auth` is specified in the CLI arguments for the REST
+server.
 
 ## Commands
 A subset of admin commands are available via admin REST API - the remainder
@@ -77,6 +79,7 @@ where the listed object must be the `params` field above.
 
 ## Admin REST API
 
+### Default Settings
 ```json
 {
   "auth":"6d732245002a9499b3842c0a7f9fc6b2d657c77bd612dbefa4f7f9357d08530a",
@@ -87,6 +90,16 @@ where the listed object must be the `params` field above.
  }
 ```
 will put the listed address into the "inactive" state.
+
+### `--disable-admin-auth` Setting
+```json
+{
+  "params":{
+    "status": "inactive",
+    "addresses": ["9sAejnQ9EBR1111111111111111111111111111111111AdYmVTw2Tv6L9KYkHjJ2wd737ov8ZL5QU7CJ4zV6basGP9fyno"]
+  }
+ }
+```
 
 ## monero-lws-admin
 
@@ -102,6 +115,7 @@ will put the listed address into the "inactive" state.
 
 ## Webhook Add
 ### Initial Request
+#### Default Settings
 ```json
 {
   "auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09",
@@ -114,6 +128,19 @@ will put the listed address into the "inactive" state.
   }
 }
 ```
+#### `--disable-admin-auth` Setting
+```json
+{
+  "params": {
+    "type": "tx-confirmation",
+    "url": "http://127.0.0.1:7000",
+    "payment_id": "df034c176eca3296",
+    "token": "1234",
+    "address": "9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j"
+  }
+}
+```
+
 ### Initial Response
 ```json
 {
