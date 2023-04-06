@@ -48,7 +48,7 @@ namespace lws
     static expect<rpc::client> sync(db::storage disk, rpc::client client);
 
     //! Poll daemon until `stop()` is called, using `thread_count` threads.
-    static void run(db::storage disk, rpc::context ctx, std::size_t thread_count);
+    static void run(db::storage disk, rpc::context ctx, std::size_t thread_count, boost::string_ref webhook_ssl_verification);
 
     //! \return True if `stop()` has never been called.
     static bool is_running() noexcept { return running; }
