@@ -252,13 +252,15 @@ namespace db
   };
   WIRE_DECLARE_ENUM(webhook_type);
 
+  //! Key for upcoming webhooks or in-progress webhooks
   struct webhook_key
   {
     account_id user;
     webhook_type type;
-    char reserved[3];
+    bool ongoing; // user requested multiple confirmations
+    char reserved[2];
   };
-  static_assert(sizeof(webhook_key) == 4 + 1 + 3, "padding in webhook_key");
+  static_assert(sizeof(webhook_key) == 4 + 1 + 1 + 2, "padding in webhook_key");
   WIRE_DECLARE_OBJECT(webhook_key);
 
   //! Webhook values used to sort by duplicate keys
@@ -274,6 +276,7 @@ namespace db
   {
     std::string url;
     std::string token;
+    boost::optional<transaction_link> event;
     std::uint32_t confirmations;
   };
   WIRE_MSGPACK_DECLARE_OBJECT(webhook_data);
@@ -290,6 +293,13 @@ namespace db
     output tx_info;
   };
   void write_bytes(wire::json_writer&, const webhook_tx_confirmation&);
+
+  //! Used for rollback ongoing events
+  struct webhook_event
+  {
+    webhook_key key;
+    webhook_dupsort dupsort;
+  };
 
   inline constexpr bool operator==(output_id left, output_id right) noexcept
   {
@@ -310,12 +320,23 @@ namespace db
       left.low <= right.low : left.high < right.high;
   }
 
+  inline constexpr bool operator==(const webhook_key& left, const webhook_key& right) noexcept
+  {
+    return left.user == right.user && left.type == right.type && left.ongoing == right.ongoing;
+  }
   inline constexpr bool operator<(const webhook_key& left, const webhook_key& right) noexcept
   {
     return left.user == right.user ?
-      left.type < right.type : left.user < right.user;
+      (left.type == right.type ?
+        int(left.ongoing) < int(right.ongoing) : left.type < right.type) : left.user < right.user;
   }
   bool operator<(const webhook_dupsort& left, const webhook_dupsort& right) noexcept;
+  inline bool operator<(const webhook_event& left, const webhook_event& right) noexcept
+  {
+    return left.key == right.key ?
+      left.dupsort < right.dupsort : left.key < right.key;
+  }
+
 
   bool operator<(transaction_link const& left, transaction_link const& right) noexcept;
   bool operator<=(transaction_link const& left, transaction_link const& right) noexcept;

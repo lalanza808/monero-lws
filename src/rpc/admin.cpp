@@ -230,6 +230,7 @@ namespace lws { namespace rpc
         db::webhook_data{
           std::move(req.url),
           std::move(req.token).value_or(std::string{}),
+          boost::none,
           req.confirmations.value_or(1)
         }
       };

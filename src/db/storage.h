@@ -58,6 +58,7 @@ namespace db
     MONERO_CURSOR(accounts_by_height);
   
     MONERO_CURSOR(webhooks);
+    MONERO_CURSOR(events);
   }
 
   struct storage_internal;

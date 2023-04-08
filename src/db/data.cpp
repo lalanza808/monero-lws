@@ -102,7 +102,7 @@ namespace db
     template<typename F, typename T>
     void map_transaction_link(F& format, T& self)
     {
-      wire::object(format, WIRE_FIELD(height), WIRE_FIELD(tx_hash));
+      wire::object(format, WIRE_FIELD_ID(0, height), WIRE_FIELD_ID(1, tx_hash));
     }
   }
   WIRE_DEFINE_OBJECT(transaction_link, map_transaction_link);
@@ -216,7 +216,7 @@ namespace db
     template<typename F, typename T>
     void map_webhook_key(F& format, T& self)
     {
-      wire::object(format, WIRE_FIELD_ID(0, user), WIRE_FIELD_ID(1, type));
+      wire::object(format, WIRE_FIELD_ID(0, user), WIRE_FIELD_ID(1, type), WIRE_FIELD_ID(2, ongoing));
     }
 
     template<typename F, typename T>
@@ -225,7 +225,8 @@ namespace db
       wire::object(format,
         WIRE_FIELD_ID(0, url),
         WIRE_FIELD_ID(1, token),
-        WIRE_FIELD_ID(2, confirmations)
+        WIRE_FIELD_ID(2, confirmations),
+        WIRE_OPTIONAL_FIELD_ID(3, event)
       );
     }
 
