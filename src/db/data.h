@@ -300,6 +300,7 @@ namespace db
     webhook_key key;
     webhook_dupsort dupsort;
   };
+  void write_bytes(wire::json_writer&, const webhook_event&);
 
   inline constexpr bool operator==(output_id left, output_id right) noexcept
   {

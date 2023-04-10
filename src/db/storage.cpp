@@ -737,6 +737,7 @@ namespace db
     cursor::images images_cur;
     cursor::requests requests_cur;
     cursor::webhooks webhooks_cur;
+    cursor::webhooks events_cur;
 
     MONERO_CHECK(check_cursor(*txn, db->tables.blocks, curs.blocks_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.accounts, accounts_cur));
@@ -747,6 +748,7 @@ namespace db
     MONERO_CHECK(check_cursor(*txn, db->tables.images, images_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.requests, requests_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.webhooks, webhooks_cur));
+    MONERO_CHECK(check_cursor(*txn, db->tables.events, events_cur));
 
     auto blocks_partial =
       get_blocks<boost::container::static_vector<block_info, 12>>(*curs.blocks_cur, 0);
@@ -790,6 +792,10 @@ namespace db
     if (!webhooks_data)
       return webhooks_data.error();
 
+    auto events_stream = events_by_block_id.get_key_stream(std::move(events_cur));
+    if (!events_stream)
+      return events_stream.error();
+
     const wire::as_array_filter<toggle_key_output> toggle_keys_filter{{show_keys}};
     wire::json_stream_writer json_stream{out};
     wire::object(json_stream,
@@ -801,7 +807,8 @@ namespace db
       wire::field(spends.name, wire::as_object(spends_stream->make_range(), wire::as_integer, wire::as_array)),
       wire::field(images.name, wire::as_object(images_stream->make_range(), output_id_key{}, wire::as_array)),
       wire::field(requests.name, wire::as_object(requests_stream->make_range(), wire::enum_as_string, toggle_keys_filter)),
-      wire::field(webhooks.name, std::cref(*webhooks_data))
+      wire::field(webhooks.name, std::cref(*webhooks_data)),
+      wire::field(events_by_block_id.name, wire::as_object(events_stream->make_range(), wire::as_integer, wire::as_array))
     );
     json_stream.finish();
 
@@ -1022,6 +1029,7 @@ namespace db
         MONERO_LMDB_CHECK(mdb_cursor_del(webhooks_cur.get(), 0));
         MONERO_LMDB_CHECK(mdb_cursor_put(webhooks_cur.get(), &wkey, &wvalue, 0));
 
+        MONERO_LMDB_CHECK(mdb_cursor_del(events_cur.get(), 0));
         err = mdb_cursor_get(events_cur.get(), &key, &value, MDB_NEXT);
       }
       return success();
@@ -1794,7 +1802,9 @@ namespace db
       {
         webhook_dupsort sorter{};
         static_assert(sizeof(sorter.payment_id) == sizeof(out.payment_id.short_), "bad memcpy");
-        std::memcpy(std::addressof(sorter.payment_id), std::addressof(out.payment_id.short_), sizeof(sorter.payment_id));
+        std::memcpy(
+          std::addressof(sorter.payment_id), std::addressof(out.payment_id.short_), sizeof(sorter.payment_id)
+        );
 
         for (; /* all user/payment_id==x entries */ ;)
         {
@@ -1824,15 +1834,15 @@ namespace db
 
             events.back().key.ongoing = true;
             events.back().value.second.event = out.link;
-            const epee::byte_slice value_bytes =
+            const epee::byte_slice bytes =
               webhooks.make_value(events.back().value.first, events.back().value.second);
 
             key = lmdb::to_val(events.back().key);
-            value = MDB_val{value_bytes.size(), const_cast<void*>(static_cast<const void*>(value_bytes.data()))};
+            value = MDB_val{bytes.size(), const_cast<void*>(static_cast<const void*>(bytes.data()))};
             MONERO_LMDB_CHECK(mdb_cursor_put(&webhooks_cur, &key, &value, 0));
 
             const webhook_event event{events.back().key, events.back().value.first};
-            key = lmdb::to_val(user_id);
+            key = lmdb::to_val(out.link.height);
             value = lmdb::to_val(event);
             MONERO_LMDB_CHECK(mdb_cursor_put(&events_cur, &key, &value, 0));
           }
@@ -2049,7 +2059,11 @@ namespace db
           check_hooks(updated.second, *webhooks_cur, *events_cur, *user);
         if (!new_events)
           return new_events.error();
-        MONERO_CHECK(add_ongoing_hooks(updated.second, *new_events, *webhooks_cur, *outputs_cur, *events_cur, user->id(), block_id(first_new), block_id(last_update)));
+        MONERO_CHECK(
+          add_ongoing_hooks(
+            updated.second, *new_events, *webhooks_cur, *outputs_cur, *events_cur, user->id(), block_id(first_new), block_id(last_update)
+          )
+        );
 
         ++updated.first;
       } // ... for every account being updated ...

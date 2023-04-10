@@ -276,6 +276,20 @@ namespace db
     );
   }
 
+  void write_bytes(wire::json_writer& dest, const webhook_event& self)
+  {
+    crypto::hash8 payment_id;
+    static_assert(sizeof(payment_id) == sizeof(self.dupsort.payment_id), "bad memcpy");
+    std::memcpy(std::addressof(payment_id), std::addressof(self.dupsort.payment_id), sizeof(payment_id));
+    wire::object(dest,
+      wire::field<0>("user", std::cref(self.key.user)),
+      wire::field<1>("type", std::cref(self.key.type)),
+      wire::field<2>("ongoing", std::cref(self.key.ongoing)),
+      wire::field<3>("payment_id", std::cref(payment_id)),
+      wire::field<4>("id", std::cref(self.dupsort.event_id))
+    );
+  }
+
   bool operator<(const webhook_dupsort& left, const webhook_dupsort& right) noexcept
   {
     return left.payment_id == right.payment_id ?
