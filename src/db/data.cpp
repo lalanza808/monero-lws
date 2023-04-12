@@ -216,7 +216,7 @@ namespace db
     template<typename F, typename T>
     void map_webhook_key(F& format, T& self)
     {
-      wire::object(format, WIRE_FIELD_ID(0, user), WIRE_FIELD_ID(1, type), WIRE_FIELD_ID(2, ongoing));
+      wire::object(format, WIRE_FIELD_ID(0, user), WIRE_FIELD_ID(1, type));
     }
 
     template<typename F, typename T>
@@ -225,8 +225,7 @@ namespace db
       wire::object(format,
         WIRE_FIELD_ID(0, url),
         WIRE_FIELD_ID(1, token),
-        WIRE_FIELD_ID(2, confirmations),
-        WIRE_OPTIONAL_FIELD_ID(3, event)
+        WIRE_FIELD_ID(2, confirmations)
       );
     }
 
@@ -271,7 +270,7 @@ namespace db
       wire::field<1>("payment_id", std::cref(payment_id)),
       wire::field<2>("token", std::cref(self.value.second.token)),
       wire::field<3>("confirmations", std::cref(self.value.second.confirmations)),
-      wire::field<4>("id", std::cref(self.value.first.event_id)),
+      wire::field<4>("event_id", std::cref(self.value.first.event_id)),
       WIRE_FIELD_ID(5, tx_info)
     );
   }
@@ -279,14 +278,13 @@ namespace db
   void write_bytes(wire::json_writer& dest, const webhook_event& self)
   {
     crypto::hash8 payment_id;
-    static_assert(sizeof(payment_id) == sizeof(self.dupsort.payment_id), "bad memcpy");
-    std::memcpy(std::addressof(payment_id), std::addressof(self.dupsort.payment_id), sizeof(payment_id));
+    static_assert(sizeof(payment_id) == sizeof(self.link_webhook.payment_id), "bad memcpy");
+    std::memcpy(std::addressof(payment_id), std::addressof(self.link_webhook.payment_id), sizeof(payment_id));
     wire::object(dest,
-      wire::field<0>("user", std::cref(self.key.user)),
-      wire::field<1>("type", std::cref(self.key.type)),
-      wire::field<2>("ongoing", std::cref(self.key.ongoing)),
-      wire::field<3>("payment_id", std::cref(payment_id)),
-      wire::field<4>("id", std::cref(self.dupsort.event_id))
+      wire::field<0>("tx_info", std::cref(self.link.tx)),
+      wire::field<1>("output_id", std::cref(self.link.out)),
+      wire::field<2>("payment_id", std::cref(payment_id)),
+      wire::field<3>("event_id", std::cref(self.link_webhook.event_id))
     );
   }
 
@@ -299,7 +297,11 @@ namespace db
 
   /*! TODO consider making an `operator<` for `crypto::tx_hash`. Not known to be
     needed elsewhere yet. */
-
+  bool operator==(transaction_link const& left, transaction_link const& right) noexcept
+  {
+    return left.height == right.height &&
+      std::memcmp(std::addressof(left.tx_hash), std::addressof(right.tx_hash), sizeof(left.tx_hash)) == 0;
+  }
   bool operator<(transaction_link const& left, transaction_link const& right) noexcept
   {
     return left.height == right.height ?

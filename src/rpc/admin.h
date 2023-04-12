@@ -87,6 +87,12 @@ namespace rpc
   };
   void read_bytes(wire::reader&, webhook_delete_req&);
 
+  struct webhook_delete_uuid_req
+  {
+    std::vector<boost::uuids::uuid> event_ids;
+  };
+  void read_bytes(wire::reader&, webhook_delete_uuid_req&);
+
 
   struct accept_requests_
   {
@@ -154,5 +160,22 @@ namespace rpc
     expect<void> operator()(wire::writer& dest, db::storage disk, const request& req) const;
   };
   constexpr const webhook_delete_ webhook_delete{};
+
+  struct webhook_del_uuid_
+  {
+    using request = webhook_delete_uuid_req;
+    expect<void> operator()(wire::writer& dest, db::storage disk, request req) const;
+  };
+  constexpr const webhook_del_uuid_ webhook_delete_uuid{};
+
+
+  struct webhook_list_
+  {
+    using request = expect<void>;
+    expect<void> operator()(wire::writer& dest, db::storage disk) const;
+    expect<void> operator()(wire::writer& dest, db::storage disk, const request&) const
+    { return (*this)(dest, std::move(disk)); }
+  };
+  constexpr const webhook_list_ webhook_list{};
 
 }} // lws // rpc

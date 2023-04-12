@@ -72,6 +72,8 @@ are:
     * **token**: A string to be returned when the webhook is triggered
     * **payment_id**: 16 hex characters representing a unique identifier for a transaction
   * **webhook_delete**: `{"addresses":[...]}`
+  * **webhook_delete_uuid**: `{"event_ids": [...]}`
+  * **webhook_list**: `{}`
 
 where the listed object must be the `params` field above.
 

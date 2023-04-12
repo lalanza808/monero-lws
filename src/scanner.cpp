@@ -161,6 +161,8 @@ namespace lws
       const std::string& url = event.value.second.url;
       const epee::byte_slice bytes = wire::json::to_bytes(event);
       const net::http::http_response_info* info = nullptr;
+
+      MINFO("Sending webhook to " << url);
       if (!client.invoke(uri, "POST", std::string{bytes.begin(), bytes.end()}, timeout, std::addressof(info), params))
       {
         MERROR("Failed to invoke http request to  " << url);

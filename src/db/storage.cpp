@@ -209,8 +209,8 @@ namespace db
     constexpr const lmdb::msgpack_table<webhook_key, webhook_dupsort, webhook_data> webhooks{
       "webhooks_by_account_id,payment_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<db::webhook_dupsort>
     };
-    constexpr const lmdb::basic_table<block_id, webhook_event> events_by_block_id{
-      "webhook_events_by_block_id,account_id,type,ongoing,payment_id,event_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<webhook_event>
+    constexpr const lmdb::basic_table<account_id, webhook_event> events_by_account_id{
+      "webhook_events_by_account_id,type,block_id,tx_hash,output_id,payment_id,event_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<webhook_event>
     };
 
     template<typename D>
@@ -483,7 +483,7 @@ namespace db
       tables.images      = images.open(*txn).value();
       tables.requests    = requests.open(*txn).value();
       tables.webhooks    = webhooks.open(*txn).value();
-      tables.events      = events_by_block_id.open(*txn).value();
+      tables.events      = events_by_account_id.open(*txn).value();
 
       check_blockchain(*txn, tables.blocks);
 
@@ -660,6 +660,46 @@ namespace db
     return requests.get_value<request_info>(value);
   }
 
+  expect<std::vector<std::pair<webhook_key, std::vector<webhook_value>>>>
+  storage_reader::get_webhooks(cursor::webhooks cur)
+  {
+    MONERO_PRECOND(txn != nullptr);
+    assert(db != nullptr);
+    MONERO_CHECK(check_cursor(*txn, db->tables.webhooks, cur));
+
+    std::vector<std::pair<webhook_key, std::vector<webhook_value>>> out;
+
+    MDB_val key{};
+    MDB_val value{};
+    int err = mdb_cursor_get(cur.get(), &key, &value, MDB_FIRST);
+    for (;/* every key */;)
+    {
+      if (err)
+      {
+        if (err == MDB_NOTFOUND)
+          return {std::move(out)};
+        return {lmdb::error(err)};
+      }
+
+      out.emplace_back(MONERO_UNWRAP(webhooks.get_key(key)), std::vector<webhook_value>{});
+
+      for (; /* every dup key */ ;)
+      {
+        if (err)
+        {
+          if (err == MDB_NOTFOUND)
+            break; // inner duplicate key loop
+          return {lmdb::error(err)};
+        }
+        out.back().second.push_back(MONERO_UNWRAP(webhooks.get_value(value)));
+        err = mdb_cursor_get(cur.get(), &key, &value, MDB_NEXT_DUP);
+      }
+      err = mdb_cursor_get(cur.get(), &key, &value, MDB_NEXT);
+    }
+
+    return {std::move(out)};
+  }
+
   namespace
   {
     //! `write_bytes` implementation will forward a third argument for `show_keys`.
@@ -792,7 +832,7 @@ namespace db
     if (!webhooks_data)
       return webhooks_data.error();
 
-    auto events_stream = events_by_block_id.get_key_stream(std::move(events_cur));
+    auto events_stream = events_by_account_id.get_key_stream(std::move(events_cur));
     if (!events_stream)
       return events_stream.error();
 
@@ -808,7 +848,7 @@ namespace db
       wire::field(images.name, wire::as_object(images_stream->make_range(), output_id_key{}, wire::as_array)),
       wire::field(requests.name, wire::as_object(requests_stream->make_range(), wire::enum_as_string, toggle_keys_filter)),
       wire::field(webhooks.name, std::cref(*webhooks_data)),
-      wire::field(events_by_block_id.name, wire::as_object(events_stream->make_range(), wire::as_integer, wire::as_array))
+      wire::field(events_by_account_id.name, wire::as_object(events_stream->make_range(), wire::as_integer, wire::as_array))
     );
     json_stream.finish();
 
@@ -1003,34 +1043,28 @@ namespace db
       MDB_val key = lmdb::to_val(height);
       MDB_val value{};
 
-      int err = mdb_cursor_get(events_cur.get(), &key, &value, MDB_SET_RANGE);
-      for ( ; /*every recent webhook event */ ; )
+      int err = mdb_cursor_get(events_cur.get(), &key, &value, MDB_LAST);
+      for ( ; /* every user */ ; )
       {
-        if (err)
+        for ( ; /* every event */ ;)
         {
-          if (err == MDB_NOTFOUND)
-            return success();
-          return {lmdb::error(err)};
+          if (err)
+          {
+            if (err == MDB_NOTFOUND)
+              return success();
+            return {lmdb::error(err)};
+          }
+
+          const webhook_event event =
+            MONERO_UNWRAP(events_by_account_id.get_value<webhook_event>(value));
+
+          if (event.link.tx.height < height)
+            break; // inner for loop
+
+          MONERO_LMDB_CHECK(mdb_cursor_del(events_cur.get(), 0));
+          err = mdb_cursor_get(events_cur.get(), &key, &value, MDB_PREV);
         }
-
-        webhook_event event = MONERO_UNWRAP(events_by_block_id.get_value<webhook_event>(value));
-        MDB_val wkey = lmdb::to_val(event.key);
-        MDB_val wvalue = lmdb::to_val(event.dupsort);
-        MONERO_LMDB_CHECK(mdb_cursor_get(webhooks_cur.get(), &key, &value, MDB_GET_BOTH));
-        webhook_value modify = MONERO_UNWRAP(webhooks.get_value(value));
-
-        event.key.ongoing = false;
-        modify.second.event.reset();
-        const epee::byte_slice bytes =
-          webhooks.make_value(modify.first, modify.second);
-
-        wkey = lmdb::to_val(event.key);
-        wvalue = MDB_val{bytes.size(), const_cast<void*>(static_cast<const void*>(bytes.data()))};
-        MONERO_LMDB_CHECK(mdb_cursor_del(webhooks_cur.get(), 0));
-        MONERO_LMDB_CHECK(mdb_cursor_put(webhooks_cur.get(), &wkey, &wvalue, 0));
-
-        MONERO_LMDB_CHECK(mdb_cursor_del(events_cur.get(), 0));
-        err = mdb_cursor_get(events_cur.get(), &key, &value, MDB_NEXT);
+        err = mdb_cursor_get(events_cur.get(), &key, &value, MDB_PREV_NODUP);
       }
       return success();
     }
@@ -1788,14 +1822,10 @@ namespace db
       return success();
     }
 
-    using event_tracker = std::unordered_set<boost::uuids::uuid>;
-
-    expect<event_tracker>
-    check_hooks(std::vector<webhook_tx_confirmation>& events, MDB_cursor& webhooks_cur, MDB_cursor& events_cur, const lws::account& user)
+    expect<void> check_hooks(MDB_cursor& webhooks_cur, MDB_cursor& events_cur, const lws::account& user)
     {
-      event_tracker new_events;
       const account_id user_id = user.id();
-      const webhook_key hook_key{user_id, webhook_type::tx_confirmation, false};
+      const webhook_key hook_key{user_id, webhook_type::tx_confirmation};
 
       // check payment_id == x (match specific) webhooks second
       for (const output& out : user.outputs())
@@ -1806,64 +1836,46 @@ namespace db
           std::addressof(sorter.payment_id), std::addressof(out.payment_id.short_), sizeof(sorter.payment_id)
         );
 
+        MDB_val key = lmdb::to_val(hook_key);
+        MDB_val value = lmdb::to_val(sorter);
+        int err = mdb_cursor_get(&webhooks_cur, &key, &value, MDB_GET_BOTH_RANGE);
+
         for (; /* all user/payment_id==x entries */ ;)
         {
-          MDB_val key = lmdb::to_val(hook_key);
-          MDB_val value = lmdb::to_val(sorter);
+          if (err)
           {
-            const int err = mdb_cursor_get(&webhooks_cur, &key, &value, MDB_GET_BOTH_RANGE);
-            if (err)
-            {
-              if (err != MDB_NOTFOUND)
-                return {lmdb::error(err)};
-              break;
-            }
+            if (err != MDB_NOTFOUND)
+              return {lmdb::error(err)};
+            break;
           }
-          if (MONERO_UNWRAP(webhooks.get_fixed_value<MONERO_FIELD(webhook_dupsort, payment_id)>(value)) != sorter.payment_id)
+          const webhook_dupsort db_sorter = MONERO_UNWRAP(webhooks.get_fixed_value<webhook_dupsort>(value));
+          if (db_sorter.payment_id != sorter.payment_id)
             break;
 
-          events.emplace_back();
-          events.back().key = MONERO_UNWRAP(webhooks.get_key(key));
-          events.back().value = MONERO_UNWRAP(webhooks.get_value(value));
-          events.back().tx_info = out;
+          const webhook_event event{
+            webhook_output{out.link, out.spend_meta.id}, db_sorter
+          };
 
-          MONERO_LMDB_CHECK(mdb_cursor_del(&webhooks_cur, 0));
-          if (1 < events.back().value.second.confirmations)
-          {
-            new_events.insert(events.back().value.first.event_id);
-
-            events.back().key.ongoing = true;
-            events.back().value.second.event = out.link;
-            const epee::byte_slice bytes =
-              webhooks.make_value(events.back().value.first, events.back().value.second);
-
-            key = lmdb::to_val(events.back().key);
-            value = MDB_val{bytes.size(), const_cast<void*>(static_cast<const void*>(bytes.data()))};
-            MONERO_LMDB_CHECK(mdb_cursor_put(&webhooks_cur, &key, &value, 0));
-
-            const webhook_event event{events.back().key, events.back().value.first};
-            key = lmdb::to_val(out.link.height);
-            value = lmdb::to_val(event);
-            MONERO_LMDB_CHECK(mdb_cursor_put(&events_cur, &key, &value, 0));
-          }
-
-          events.back().value.second.confirmations = 1;
+          MDB_val ekey = lmdb::to_val(user_id);
+          MDB_val evalue = lmdb::to_val(event);
+          MONERO_LMDB_CHECK(mdb_cursor_put(&events_cur, &ekey, &evalue, 0));
+          err = mdb_cursor_get(&webhooks_cur, &key, &value, MDB_NEXT_DUP);
         }
       }
-      return {std::move(new_events)};
+      return success();
     }
 
     expect<void>
-    add_ongoing_hooks(std::vector<webhook_tx_confirmation>& events, const event_tracker& new_events, MDB_cursor& webhooks_cur, MDB_cursor& outputs_cur, MDB_cursor& events_cur, const account_id user, const block_id begin, const block_id end)
+    add_ongoing_hooks(std::vector<webhook_tx_confirmation>& events, MDB_cursor& webhooks_cur, MDB_cursor& outputs_cur, MDB_cursor& events_cur, const account_id user, const block_id begin, const block_id end)
     {
       if (begin == end)
         return success();
 
-      const webhook_key hook_key{user, webhook_type::tx_confirmation, true};
-      MDB_val key = lmdb::to_val(hook_key);
+      const webhook_key hook_key{user, webhook_type::tx_confirmation};
+      MDB_val key = lmdb::to_val(user);
       MDB_val value{};
 
-      int err = mdb_cursor_get(&webhooks_cur, &key, &value, MDB_SET_KEY);
+      int err = mdb_cursor_get(&events_cur, &key, &value, MDB_SET_KEY);
       for ( ; /* every ongoing event from this user */ ; )
       {
         if (err)
@@ -1873,57 +1885,42 @@ namespace db
           return success();
         }
 
-        const bool new_event =
-          new_events.count(
-            MONERO_UNWRAP(webhooks.get_fixed_value<MONERO_FIELD(webhook_dupsort, event_id)>(value))
-          );
+        const webhook_event event =
+          MONERO_UNWRAP(events_by_account_id.get_value<webhook_event>(value));
 
-        std::uint64_t current = new_event ?
-          lmdb::to_native(begin) + 1 : lmdb::to_native(begin);
+        MDB_val rkey = lmdb::to_val(hook_key);
+        MDB_val rvalue = lmdb::to_val(event.link_webhook);
+        MONERO_LMDB_CHECK(mdb_cursor_get(&webhooks_cur, &rkey, &rvalue, MDB_GET_BOTH));
 
-        // when new event and only block, skip (to prevent duplicate callbacks)
-        if (block_id(current) == end)
-          continue;
+        MDB_val okey = lmdb::to_val(user);
+        MDB_val ovalue = lmdb::to_val(event.link);
+        MONERO_LMDB_CHECK(mdb_cursor_get(&outputs_cur, &okey, &ovalue, MDB_GET_BOTH));
 
-        events.emplace_back();
-        events.back().key = MONERO_UNWRAP(webhooks.get_key(key));
-        events.back().value = MONERO_UNWRAP(webhooks.get_value(value));
-
-        const auto& this_event = events.back().value.second.event;
-        if (!this_event)
-          MONERO_THROW(error::bad_webhook, "Invalid DB");
+        events.push_back(
+          webhook_tx_confirmation{
+            MONERO_UNWRAP(webhooks.get_key(rkey)),
+            MONERO_UNWRAP(webhooks.get_value(rvalue)),
+            MONERO_UNWRAP(outputs.get_value<output>(ovalue))
+          }
+        );
 
         const std::uint32_t requested_confirmations =
           events.back().value.second.confirmations;
 
-        { // lookup real output
-          MDB_val okey = lmdb::to_val(hook_key.user);
-          MDB_val ovalue = lmdb::to_val(*this_event);
-          MONERO_LMDB_CHECK(mdb_cursor_get(&outputs_cur, &okey, &ovalue, MDB_GET_BOTH));
-          events.back().tx_info = MONERO_UNWRAP(outputs.get_value<output>(ovalue));
-          events.back().value.second.confirmations =
-            current - lmdb::to_native(this_event->height) + 1;
-        }
+        events.back().value.second.confirmations =
+          lmdb::to_native(begin) - lmdb::to_native(event.link.tx.height) + 1;
 
         // copy next blocks from first
-        for (const auto block_num : boost::counting_range(current + 1, lmdb::to_native(end)))
+        for (const auto block_num : boost::counting_range(lmdb::to_native(begin) + 1, lmdb::to_native(end)))
         {
           if (requested_confirmations <= events.back().value.second.confirmations)
-          {
-            MONERO_LMDB_CHECK(mdb_cursor_del(&webhooks_cur, 0));
-
-            webhook_event event_{events.back().key, events.back().value.first};
-            MDB_val ekey = lmdb::to_val(this_event->height);
-            MDB_val evalue = lmdb::to_val(event_);
-            MONERO_LMDB_CHECK(mdb_cursor_get(&events_cur, &key, &value, MDB_GET_BOTH));
-            MONERO_LMDB_CHECK(mdb_cursor_del(&events_cur, 0));
             break;
-          }
           events.push_back(events.back());
           ++(events.back().value.second.confirmations);
-        }
-
-        err = mdb_cursor_get(&webhooks_cur, &key, &value, MDB_NEXT_DUP);
+	      }
+        if (requested_confirmations <= events.back().value.second.confirmations)
+          MONERO_LMDB_CHECK(mdb_cursor_del(&events_cur, 0));
+        err = mdb_cursor_get(&events_cur, &key, &value, MDB_NEXT_DUP);
       }
       return success();
     }
@@ -2055,13 +2052,10 @@ namespace db
         MONERO_CHECK(bulk_insert(*outputs_cur, user->id(), epee::to_span(user->outputs())));
         MONERO_CHECK(add_spends(*spends_cur, *images_cur, user->id(), epee::to_span(user->spends())));
 
-        const expect<event_tracker> new_events =
-          check_hooks(updated.second, *webhooks_cur, *events_cur, *user);
-        if (!new_events)
-          return new_events.error();
+        MONERO_CHECK(check_hooks(*webhooks_cur, *events_cur, *user));
         MONERO_CHECK(
           add_ongoing_hooks(
-            updated.second, *new_events, *webhooks_cur, *outputs_cur, *events_cur, user->id(), block_id(first_new), block_id(last_update)
+            updated.second, *webhooks_cur, *outputs_cur, *events_cur, user->id(), block_id(first_new), block_id(last_update + 1)
           )
         );
 
@@ -2105,8 +2099,6 @@ namespace db
         return {error::bad_webhook};
 
       lmkey = lmdb::to_val(key);
-      
-
       const epee::byte_slice value = webhooks.make_value(event.first, event.second);
       lmvalue = MDB_val{value.size(), const_cast<void*>(static_cast<const void*>(value.data()))};
       MONERO_LMDB_CHECK(mdb_cursor_put(webhooks_cur.get(), &lmkey, &lmvalue, 0));
@@ -2123,9 +2115,11 @@ namespace db
      {
        cursor::accounts_by_address accounts_ba_cur;
        cursor::webhooks            webhooks_cur;
+       cursor::events              events_cur;
 
        MONERO_CHECK(check_cursor(txn, this->db->tables.accounts_ba, accounts_ba_cur));
        MONERO_CHECK(check_cursor(txn, this->db->tables.webhooks, webhooks_cur));
+       MONERO_CHECK(check_cursor(txn, this->db->tables.events, events_cur));
 
        webhook_key key{account_id::invalid, webhook_type::tx_confirmation};
        for (const auto& address : addresses)
@@ -2139,6 +2133,67 @@ namespace db
          lmkey = lmdb::to_val(key);
          MONERO_LMDB_CHECK(mdb_cursor_get(webhooks_cur.get(), &lmkey, &lmvalue, MDB_SET));
          MONERO_LMDB_CHECK(mdb_cursor_del(webhooks_cur.get(), MDB_NODUPDATA));
+
+         lmkey = lmdb::to_val(key.user);
+         MONERO_LMDB_CHECK(mdb_cursor_get(events_cur.get(), &lmkey, &lmvalue, MDB_SET));
+         MONERO_LMDB_CHECK(mdb_cursor_del(events_cur.get(), MDB_NODUPDATA));
+       }
+
+       return success();
+     });
+   }
+
+   expect<void> storage::clear_webhooks(std::vector<boost::uuids::uuid> ids)
+   {
+     if (ids.empty())
+       return success();
+
+     std::sort(ids.begin(), ids.end());
+
+     return db->try_write([this, &ids] (MDB_txn& txn) -> expect<void>
+     {
+       cursor::webhooks            webhooks_cur;
+       cursor::events              events_cur;
+
+       MONERO_CHECK(check_cursor(txn, this->db->tables.webhooks, webhooks_cur));
+       MONERO_CHECK(check_cursor(txn, this->db->tables.events, events_cur));
+
+       MDB_val key{};
+       MDB_val value{};
+       int err = mdb_cursor_get(webhooks_cur.get(), &key, &value, MDB_FIRST);
+       for ( ; /* every webhook */ ; )
+       {
+         if (err)
+         {
+           if (err == MDB_NOTFOUND)
+             break;
+           return {lmdb::error(err)};
+         }
+
+         const boost::uuids::uuid id =
+           MONERO_UNWRAP(webhooks.get_fixed_value<MONERO_FIELD(webhook_dupsort, event_id)>(value));
+         if (std::binary_search(ids.begin(), ids.end(), id))
+           MONERO_LMDB_CHECK(mdb_cursor_del(webhooks_cur.get(), 0));
+
+         err = mdb_cursor_get(webhooks_cur.get(), &key, &value, MDB_NEXT);
+       }
+
+       err = mdb_cursor_get(events_cur.get(), &key, &value, MDB_FIRST);
+       for ( ; /* every event */ ; )
+       {
+         if (err)
+         {
+           if (err == MDB_NOTFOUND)
+             break;
+           return {lmdb::error(err)};
+         }
+
+         const webhook_dupsort event =
+           MONERO_UNWRAP(events_by_account_id.get_value<MONERO_FIELD(webhook_event, link_webhook)>(value));
+         if (std::binary_search(ids.begin(), ids.end(), event.event_id))
+           MONERO_LMDB_CHECK(mdb_cursor_del(events_cur.get(), 0));
+
+         err = mdb_cursor_get(events_cur.get(), &key, &value, MDB_NEXT);
        }
 
        return success();

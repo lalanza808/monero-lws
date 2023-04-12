@@ -257,16 +257,15 @@ namespace db
   {
     account_id user;
     webhook_type type;
-    bool ongoing; // user requested multiple confirmations
-    char reserved[2];
+    char reserved[3];
   };
-  static_assert(sizeof(webhook_key) == 4 + 1 + 1 + 2, "padding in webhook_key");
+  static_assert(sizeof(webhook_key) == 4 + 1 + 3, "padding in webhook_key");
   WIRE_DECLARE_OBJECT(webhook_key);
 
   //! Webhook values used to sort by duplicate keys
   struct webhook_dupsort
   {
-    std::uint64_t payment_id; //!< Only used with `tx_confirmation` type. 0 means track all incoming txes
+    std::uint64_t payment_id; //!< Only used with `tx_confirmation` type.
     boost::uuids::uuid event_id;
   };
   static_assert(sizeof(webhook_dupsort) == 8 + 16, "padding in webhoook");
@@ -276,7 +275,6 @@ namespace db
   {
     std::string url;
     std::string token;
-    boost::optional<transaction_link> event;
     std::uint32_t confirmations;
   };
   WIRE_MSGPACK_DECLARE_OBJECT(webhook_data);
@@ -294,13 +292,24 @@ namespace db
   };
   void write_bytes(wire::json_writer&, const webhook_tx_confirmation&);
 
-  //! Used for rollback ongoing events
+  //! References a specific output that triggered a webhook
+  struct webhook_output
+  {
+    transaction_link tx;
+    output_id out;
+  };
+
+  //! References all info from a webhook that triggered
   struct webhook_event
   {
-    webhook_key key;
-    webhook_dupsort dupsort;
+    webhook_output link;
+    webhook_dupsort link_webhook;
   };
   void write_bytes(wire::json_writer&, const webhook_event&);
+
+  bool operator==(transaction_link const& left, transaction_link const& right) noexcept;
+  bool operator<(transaction_link const& left, transaction_link const& right) noexcept;
+  bool operator<=(transaction_link const& left, transaction_link const& right) noexcept;
 
   inline constexpr bool operator==(output_id left, output_id right) noexcept
   {
@@ -320,27 +329,28 @@ namespace db
     return left.high == right.high ?
       left.low <= right.low : left.high < right.high;
   }
-
-  inline constexpr bool operator==(const webhook_key& left, const webhook_key& right) noexcept
-  {
-    return left.user == right.user && left.type == right.type && left.ongoing == right.ongoing;
-  }
   inline constexpr bool operator<(const webhook_key& left, const webhook_key& right) noexcept
   {
     return left.user == right.user ?
-      (left.type == right.type ?
-        int(left.ongoing) < int(right.ongoing) : left.type < right.type) : left.user < right.user;
+      left.type < right.type : left.user < right.user;
   }
+
   bool operator<(const webhook_dupsort& left, const webhook_dupsort& right) noexcept;
+
+  inline bool operator==(const webhook_output& left, const webhook_output& right) noexcept
+  {
+    return left.out == right.out && left.tx == right.tx;
+  }
+  inline bool operator<(const webhook_output& left, const webhook_output& right) noexcept
+  {
+    return left.tx == right.tx ? left.out < right.out : left.tx < right.tx;
+  }
   inline bool operator<(const webhook_event& left, const webhook_event& right) noexcept
   {
-    return left.key == right.key ?
-      left.dupsort < right.dupsort : left.key < right.key;
+    return left.link == right.link ?
+      left.link_webhook < right.link_webhook : left.link < right.link;
   }
 
-
-  bool operator<(transaction_link const& left, transaction_link const& right) noexcept;
-  bool operator<=(transaction_link const& left, transaction_link const& right) noexcept;
 
   /*!
     Write `address` to `out` in base58 format using `lws::config::network` to

@@ -39,7 +39,16 @@
 #include "wire/error.h"
 #include "wire/json/write.h"
 #include "wire/traits.h"
+#include "wire/uuid.h"
 #include "wire/vector.h"
+
+namespace wire
+{
+  static void write_bytes(wire::writer& dest, const std::pair<lws::db::webhook_key, std::vector<lws::db::webhook_value>>& self)
+  {
+    wire::object(dest, wire::field<0>("key", self.first), wire::field<1>("value", self.second));
+  }
+}
 
 namespace
 {
@@ -173,6 +182,11 @@ namespace lws { namespace rpc
     read_addresses(source, self);
   }
 
+  void read_bytes(wire::reader& source, webhook_delete_uuid_req& self)
+  {
+    wire::object(source, WIRE_FIELD_ID(0, event_ids));
+  }
+
   expect<void> accept_requests_::operator()(wire::writer& dest, db::storage disk, const request& req) const
   {
     return write_addresses(dest, disk.accept_requests(req.type, epee::to_span(req.addresses)));
@@ -230,7 +244,6 @@ namespace lws { namespace rpc
         db::webhook_data{
           std::move(req.url),
           std::move(req.token).value_or(std::string{}),
-          boost::none,
           req.confirmations.value_or(1)
         }
       };
@@ -247,6 +260,30 @@ namespace lws { namespace rpc
   {
     MONERO_CHECK(disk.clear_webhooks(epee::to_span(req.addresses)));
     wire::object(dest); // write empty object
+    return success();
+  }
+
+  expect<void> webhook_del_uuid_::operator()(wire::writer& dest, db::storage disk, request req) const
+  {
+    MONERO_CHECK(disk.clear_webhooks(std::move(req.event_ids)));
+    wire::object(dest); // write empty object
+    return success();
+  }
+  
+  expect<void> webhook_list_::operator()(wire::writer& dest, db::storage disk) const
+  {
+    std::vector<std::pair<db::webhook_key, std::vector<db::webhook_value>>> data;
+    {
+      auto reader = disk.start_read();
+      if (!reader)
+        return reader.error();
+      auto data_ = reader->get_webhooks();
+      if (!data_)
+        return data_.error();
+      data = std::move(*data_);
+    }
+
+    wire::object(dest, wire::field<0>("webhooks", data));
     return success();
   }
 }} // lws // rpc

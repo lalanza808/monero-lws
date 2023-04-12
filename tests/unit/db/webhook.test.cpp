@@ -36,10 +36,22 @@
 
 namespace
 {
+  boost::filesystem::path get_db_location()
+  {
+    return tools::get_default_data_dir() + "light_wallet_server_unit_testing";
+  }
+
+  struct cleanup_db
+  {
+    ~cleanup_db()
+    {
+      boost::filesystem::remove_all(get_db_location());
+    }
+  };
+
   lws::db::storage get_fresh_db()
   {
-    const std::string location =
-      tools::get_default_data_dir() + "light_wallet_server_unit_testing";
+    const boost::filesystem::path location = get_db_location();
     boost::filesystem::remove_all(location);
     boost::filesystem::create_directories(location);
     return lws::db::storage::open(location.c_str(), 5);
@@ -48,6 +60,7 @@ namespace
 
 LWS_CASE("db::storage::*_webhook")
 {
+  cleanup_db on_scope_exit{};
   SETUP("Fresh database")
   {
     lws::db::storage db = get_fresh_db();

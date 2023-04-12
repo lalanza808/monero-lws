@@ -133,6 +133,10 @@ namespace db
     expect<request_info>
       get_request(request type, account_address const& address, cursor::requests cur = nullptr) noexcept;
 
+    //! \return All webhooks in the DB
+    expect<std::vector<std::pair<webhook_key, std::vector<webhook_value>>>>
+      get_webhooks(cursor::webhooks cur = nullptr);
+
     //! Dump the contents of the database in JSON format to `out`.
     expect<void> json_debug(std::ostream& out, bool show_keys);
 
@@ -251,6 +255,9 @@ namespace db
     /*! Delete all webhooks associated with every value in `addresses`. This is
       likely only valid for `tx_confirmation` event types. */
     expect<void> clear_webhooks(epee::span<const account_address> addressses);
+
+    //! Delete all webhooks associated with every value in `ids`
+    expect<void> clear_webhooks(std::vector<boost::uuids::uuid> ids);
 
     //! `txn` must have come from a previous call on the same thread.
     expect<storage_reader> start_read(lmdb::suspended_txn txn = nullptr) const;
