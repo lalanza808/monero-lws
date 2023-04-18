@@ -57,25 +57,130 @@ where the `params` object is specified below. The `auth` field can be omitted
 if `--disable-admin-auth` is specified in the CLI arguments for the REST
 server.
 
-## Commands
+## Commands (of Admin REST API)
 A subset of admin commands are available via admin REST API - the remainder
 are initially omitted for security purposes. The commands available via REST
 are:
-  * **accept_requests**: `{"type": "import"|"create", "addresses":[...]}`
-  * **add_account**: `{"address": ..., "key": ...}`
-  * **list_accounts**: `{}`
-  * **list_requests**: `{}`
-  * **modify_account_status**: `{"status": "active"|"hidden"|"inactive", "addresses":[...]}`
-  * **reject_requests**: `{"type": "import"|"create", "addresses":[...]}`
-  * **rescan**: `{"height":..., "addresses":[...]}`
-  * **webhook_add**: `{"type":"tx-confirmation", "address":"...", "url":"...", ...}` with optional fields:
+  * [**accept_requests**](#accept_requests): `{"type": "import"|"create", "addresses":[...]}`
+  * [**add_account**](#add_account): `{"address": ..., "key": ...}`
+  * [**list_accounts**](#list_accounts): `{}`
+  * [**list_requests**](#list_requests): `{}`
+  * [**modify_account_status**](#modify_account_status): `{"status": "active"|"hidden"|"inactive", "addresses":[...]}`
+  * [**reject_requests**](#reject_requests): `{"type": "import"|"create", "addresses":[...]}`
+  * [**rescan**](#rescan): `{"height":..., "addresses":[...]}`
+  * [**webhook_add**](#webhook_add): `{"type":"tx-confirmation", "address":"...", "url":"...", ...}` with optional fields:
     * **token**: A string to be returned when the webhook is triggered
     * **payment_id**: 16 hex characters representing a unique identifier for a transaction
-  * **webhook_delete**: `{"addresses":[...]}`
-  * **webhook_delete_uuid**: `{"event_ids": [...]}`
-  * **webhook_list**: `{}`
+  * [**webhook_delete**](#webhook_delete): `{"addresses":[...]}`
+  * [**webhook_delete_uuid**](#webhook_delete_uuid): `{"event_ids": [...]}`
+  * [**webhook_list**](#webhook_list): `{}`
 
 where the listed object must be the `params` field above.
+
+### accept_requests
+### add_account
+### list_accounts
+### list_requests
+### modify_account_status
+### reject_requests
+### rescan
+### webhook_add
+This is used to track a specific payment ID to an address or all general
+payments to an address (where payment ID is zero). Using this endpint requires
+a web address for callback purposes, a primary (not integrated!) address, and
+finally the type ("tx-confirmation").
+
+#### Initial Request to server
+Example where admin authentication is required (`--disable-admin-auth` NOT set on start):
+```json
+{
+  "auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09",
+  "params": {
+    "type": "tx-confirmation",
+    "url": "http://127.0.0.1:7000",  
+    "payment_id": "df034c176eca3296",
+    "token": "1234",
+    "address": "9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j"
+  }
+}
+```
+
+Example where admin authentication is not required (`--disable-admin-auth` set on start):
+```json
+{
+  "params": {
+    "type": "tx-confirmation",
+    "url": "http://127.0.0.1:7000",  
+    "payment_id": "df034c176eca3296",
+    "token": "1234",
+    "address": "9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j"
+  }
+}
+```
+
+As noted above - `payment_id` and `token` are both optional - `token` will
+default to the empty string, and `payment_id` will default to zero.
+##### Initial Response from Server
+The server will replay all values back to the user for confirmation. An                 
+additional field - `event_id` - is also returned which contains a globally
+unique value (internally this is a 128-bit `UUID`).
+
+Example response:
+```json
+{
+  "payment_id": "df034c176eca3296",
+  "event_id": "fa10a4db485145f1a24dc09c19a79d43",
+  "token": "1234",
+  "confirmations": 1,
+  "url": "http://127.0.0.1:7000"
+}
+```
+
+If you use the `debug_database` command provided by the `monero-lws-admin`
+executable, the event should be listed in the
+`webhooks_by_account_id,payment_id` field of the returned JSON object. The
+event will remain in the database until an explicit
+[`webhook_delete_uuid`](#webhook_delete_uuid) is invoked.
+
+#### Callback from Server
+When the event "fires" due to a transaction, the provided URL is invoked
+with a JSON payload that looks like the below:
+
+```json
+{
+  "event": "tx-confirmation",
+  "payment_id": "df034c176eca3296",
+  "token": "1234",
+  "confirmations": 1,
+  "id": "fa10a4db485145f1a24dc09c19a79d43",
+  "tx_info": {
+    "id": {
+      "high": 0,
+      "low": 5550229
+    },
+    "block": 2192100,
+    "index": 0,
+    "amount": 4949570000,
+    "timestamp": 1678324181,
+    "tx_hash": "901f9a2a919b6312131537ff6117d56ce2c0dc1f1341b845d7667299e1ef892f",
+    "tx_prefix_hash": "89685cb7acb836fde30fae8be5d8b884e92706df086960d0508e146979ef80dc",
+    "tx_public": "54c153792e47c1da8ceb3979560c424c1928b7b4a089c1c8b3ce99c563e1d240",
+    "rct_mask": "f3449407dc3721299b5309c0c336a17daeebce55165ddd447ba28bbd1f46c201",
+    "payment_id": "df034c176eca3296",
+    "unlock_time": 0,
+    "mixin_count": 15,
+    "coinbase": false
+  }
+}
+```
+which is the same information provided by the user API. The database will
+contain an entry in the `webhook_events_by_account_id,type,block_id,tx_hash,output_id,payment_id,event_id`
+field of the JSON object provided by the `debug_database` command. The
+entry will be removed when the number of confirmations has been reached.
+
+### webhook_delete
+### webhook_delete_uuid
+### webhook_list
 
 # Examples
 
@@ -114,75 +219,6 @@ will put the listed address into the "inactive" state.
   ```bash
   monero-lws-admin accept_requests create $(monero-lws-admin list_requests | jq -j '.create? | .[]? | .address?+" "')
   ```
-
-## Webhook Add
-### Initial Request
-#### Default Settings
-```json
-{
-  "auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09",
-  "params": {
-    "type": "tx-confirmation",
-    "url": "http://127.0.0.1:7000",
-    "payment_id": "df034c176eca3296",
-    "token": "1234",
-    "address": "9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j"
-  }
-}
-```
-#### `--disable-admin-auth` Setting
-```json
-{
-  "params": {
-    "type": "tx-confirmation",
-    "url": "http://127.0.0.1:7000",
-    "payment_id": "df034c176eca3296",
-    "token": "1234",
-    "address": "9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j"
-  }
-}
-```
-
-### Initial Response
-```json
-{
-  "payment_id": "df034c176eca3296",
-  "event_id": "fa10a4db485145f1a24dc09c19a79d43",
-  "token": "1234",
-  "confirmations": 1,
-  "url": "http://127.0.0.1:7000"
-}
-```
-
-### Triggered Response (to specified URL)
-```json
-{
-  "event": "tx-confirmation",
-  "payment_id": "df034c176eca3296",
-  "token": "1234",
-  "confirmations": 1,
-  "id": "fa10a4db485145f1a24dc09c19a79d43",
-  "tx_info": {
-    "id": {
-      "high": 0,
-      "low": 5550229
-    },
-    "block": 2192100,
-    "index": 0,
-    "amount": 4949570000,
-    "timestamp": 1678324181,
-    "tx_hash": "901f9a2a919b6312131537ff6117d56ce2c0dc1f1341b845d7667299e1ef892f",
-    "tx_prefix_hash": "89685cb7acb836fde30fae8be5d8b884e92706df086960d0508e146979ef80dc",
-    "tx_public": "54c153792e47c1da8ceb3979560c424c1928b7b4a089c1c8b3ce99c563e1d240",
-    "rct_mask": "f3449407dc3721299b5309c0c336a17daeebce55165ddd447ba28bbd1f46c201",
-    "payment_id": "df034c176eca3296",
-    "unlock_time": 0,
-    "mixin_count": 15,
-    "coinbase": false
-  }
-}
-```
-
 # Debugging
 
 `monero-lws-admin` has a debug mode that dumps everything stored in the
