@@ -355,7 +355,7 @@ namespace wire
 
     if (!boost::fusion::any(U{}, matched_type))
       WIRE_DLOG_THROW_(expected);
-    
+
     return out;
   }
 

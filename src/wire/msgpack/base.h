@@ -95,7 +95,7 @@ namespace wire
       //! \return True if `value` is fixed tag `T`
       static constexpr bool matches(const msgpack::tag value) noexcept
       { return matches(std::uint8_t(value)); }
-      
+
       //! \return Value encoded in fixed tag
       static constexpr std::uint8_t extract(const std::uint8_t value) noexcept
       { return value & ~mask(); }
