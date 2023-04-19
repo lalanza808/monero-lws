@@ -78,17 +78,92 @@ are:
 where the listed object must be the `params` field above.
 
 ### accept_requests
+Accepts new account and rescan from block 0 requests in the incoming
+queue.
+
 ### add_account
+Add account for view-key scanning. An example of the JSON:
+```json
+{
+  "params": {
+    "address": "9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j",
+    "key": "deadbeef"
+  },
+  "auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09"
+}
+```
+
 ### list_accounts
+Request a listing of all active accounts in the datbase. The request
+should looke like:
+```bash
+curl -v -H "Content-Type: application/json" -d '{}' http://127.0.0.1:8081/list_accounts
+```
+when auth is disabled, and when enabled:
+```bash
+curl -v -H "Content-Type: application/json" -d '{"auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09"}' http://127.0.0.1:8081/list_accounts
+```
+The response will look something like:
+```json
+{
+  "active": [
+    {
+      "address": "9wRAu3giCtKhSsVnkZJ7LLE6zqzrmMKpPg39S8aoC7T6F6GobeDpz8TcvVfTQT3ucW82oTYKG8v3ZMAeh8SZVXWwMdvwZew",
+      "scan_height": 2220875,
+      "access_time": 1681244149
+    }
+  ]
+}
+```
+
 ### list_requests
+This is a listing of all pending new account requests and all requests
+to import from genesis block requests. When auth is disabled usage
+looks like:
+```bash
+curl -v -H "Content-Type: application/json" -d '{}' http://127.0.0.1:8081/list_requests
+```
+and with auth enabled looks like:
+```bash
+curl -v -H "Content-Type: application/json" -d '{"auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09"}' http://127.0.0.1:8081/list_requests
+```
 ### modify_account_status
+This can change an account status to `active`, `inactive` or `hidden`. The
+`active` state is the normal state - the account is being scanned and
+returned by the API. The `inactive` state is still returned by the API,
+but is no longer being scanned. The `hidden` is the current way to
+"delete" an account - it is not scanned nor returned by the API. Accounts
+cannot currently be deleted due to internal DB requirements.
+
 ### reject_requests
+This is the opposite of [`accept_requests`](#accept_requests) above. See
+information from that endpoint on how to use this one.
+
 ### rescan
+This tells the scanner to rescan specific account(s) from the specified
+height.
+
 ### webhook_add
 This is used to track a specific payment ID to an address or all general
 payments to an address (where payment ID is zero). Using this endpint requires
 a web address for callback purposes, a primary (not integrated!) address, and
-finally the type ("tx-confirmation").
+finally the type ("tx-confirmation"). The event will remain in the database
+until one of the delete commands ([webhook_delete_uuid](#webhook_delete_uuid)
+or [webhook_delete](#webhook_delete)) is used to remove it.
+
+> The provided URL will use SSL/TLS if `https://` is prefixed in the URL and
+will use plaintext if `http://` is prefixed in the URL. SSL/TLS connections
+will use the system certificate authority (root-CAs) by default, and will
+ignore all authority checks if `--webhook-ssl-verification none` is provided
+on the command line when starting `monero-lws-daemon`. The webhook will fail
+if there is a mismatch of `http` and `https` between the two servers, and
+will also fail if `https` verification is mismatched. The rule is: (1) if
+the callback server has SSL/TLS disabled, the webhook should use `http://`,
+(2) if the callback server has a self-signed certificate, `https://` and
+`--webhook-ssl-verification none` should be used, and (3) if the callback
+server is using "Let's Encrypt" (or similar), then `https://` with no
+additional command line flag should be used.
+
 
 #### Initial Request to server
 Example where admin authentication is required (`--disable-admin-auth` NOT set on start):
@@ -179,8 +254,68 @@ field of the JSON object provided by the `debug_database` command. The
 entry will be removed when the number of confirmations has been reached.
 
 ### webhook_delete
+Deletes all webhooks associated with a specific Monero primary address.
+
 ### webhook_delete_uuid
+Deletes all references to a specific webhook referenced by its UUID
+(`event_id`)
+
 ### webhook_list
+This will list every webhook that is currently "listening" for
+incoming transactions. If the server has auth disabled, the
+request is simply:
+
+```bash
+curl -v -H "Content-Type: application/json" -d '{}' http://127.0.0.1:8081/webhook_list
+```
+and with auth enabled looks like:
+```bash
+curl -v -H "Content-Type: application/json" -d '{"auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09"}' http://127.0.0.1:8081/webhook_list
+```
+
+which returns a JSON object that looks like:
+```json
+{
+  "webhooks": [
+    {
+      "key": {
+        "user": 1,
+        "type": "tx-confirmation"
+      },
+      "value": [
+        {
+          "payment_id": "9bc1a59b34253896",
+          "event_id": "4dc201838af54dfe88686bea7e2b599f",
+          "token": "12345",
+          "confirmations": 5,
+          "url": "http://127.0.0.1:8082"
+        },
+        {
+          "payment_id": "9bc1a59b34253896",
+          "event_id": "615171e477464401a1a23cdb45b3b433",
+          "token": "12345",
+          "confirmations": 5,
+          "url": "http://127.0.0.1:8082"
+        },
+        {
+          "payment_id": "9bc1a59b34253896",
+          "event_id": "e64be3ad6d1647618fbd292be0485901",
+          "token": "this is a fresh test",
+          "confirmations": 1,
+          "url": "http://127.0.0.1:8082/foobar"
+        },
+        {
+          "payment_id": "9bc1a59b34253896",
+          "event_id": "fe692cdf7de1453898ad453d8fabce42",
+          "token": "12345",
+          "confirmations": 5,
+          "url": "http://127.0.0.1:8082/foobar"
+        }
+      ]
+    }
+  ]
+}
+```
 
 # Examples
 
