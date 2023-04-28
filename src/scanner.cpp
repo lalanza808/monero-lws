@@ -214,6 +214,9 @@ namespace lws
         if (https)
           ssl_options.verification = verify_mode;
 
+        if (url.port == 0)
+          url.port = https ? 443 : 80;
+
         client.set_server(url.host, std::to_string(url.port), boost::none, std::move(ssl_options));
         if (client.connect(timeout))
           send_via_http(client, url.uri, event, params, timeout);
