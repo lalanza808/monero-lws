@@ -2131,12 +2131,14 @@ namespace db
          key.user = MONERO_UNWRAP(accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup.id)>(lmvalue));
 
          lmkey = lmdb::to_val(key);
-         MONERO_LMDB_CHECK(mdb_cursor_get(webhooks_cur.get(), &lmkey, &lmvalue, MDB_SET));
-         MONERO_LMDB_CHECK(mdb_cursor_del(webhooks_cur.get(), MDB_NODUPDATA));
+         int err = mdb_cursor_get(webhooks_cur.get(), &lmkey, &lmvalue, MDB_SET);
+         if (!err)
+           MONERO_LMDB_CHECK(mdb_cursor_del(webhooks_cur.get(), MDB_NODUPDATA));
 
          lmkey = lmdb::to_val(key.user);
-         MONERO_LMDB_CHECK(mdb_cursor_get(events_cur.get(), &lmkey, &lmvalue, MDB_SET));
-         MONERO_LMDB_CHECK(mdb_cursor_del(events_cur.get(), MDB_NODUPDATA));
+         err = mdb_cursor_get(events_cur.get(), &lmkey, &lmvalue, MDB_SET);
+         if (!err)
+           mdb_cursor_del(events_cur.get(), MDB_NODUPDATA);
        }
 
        return success();
