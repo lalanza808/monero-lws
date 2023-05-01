@@ -26,13 +26,15 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-add_library(monero-lws-unit-db OBJECT storage.test.cpp webhook.test.cpp)
+add_library(monero-lws-unit-rpc OBJECT admin.test.cpp)
 target_link_libraries(
+  monero-lws-unit-rpc
   monero-lws-unit-db
   monero-lws-unit-framework
   monero-lws-common
   monero-lws-db
+  monero-lws-rpc
+  monero-lws-wire-json
   monero::libraries
-  ${Boost_PROGRAM_OPTIONS_LIBRARY}
 )
 #add_test(monero-lws-unit)

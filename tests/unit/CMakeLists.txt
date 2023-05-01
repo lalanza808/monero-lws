@@ -31,8 +31,17 @@ target_include_directories(monero-lws-unit-framework PUBLIC ${CMAKE_CURRENT_SOUR
 target_link_libraries(monero-lws-unit-framework)
 
 add_subdirectory(db)
+add_subdirectory(rpc)
 add_subdirectory(wire)
 
 add_executable(monero-lws-unit main.cpp)
-target_link_libraries(monero-lws-unit monero-lws-unit-db monero-lws-unit-framework monero-lws-unit-wire monero-lws-unit-wire-json monero-lws-unit-wire-msgpack)
+target_link_libraries(
+  monero-lws-unit
+  monero-lws-unit-db
+  monero-lws-unit-framework
+  monero-lws-unit-rpc
+  monero-lws-unit-wire
+  monero-lws-unit-wire-json
+  monero-lws-unit-wire-msgpack
+)
 add_test(NAME monero-lws-unit COMMAND monero-lws-unit -v)
