@@ -276,7 +276,7 @@ namespace rpc
     for (; /*every message */ ;)
     {
       expect<std::string> pub = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
-    	if (!pub)
+      if (!pub)
       {
         if (pub == net::zmq::make_error_code(EAGAIN))
           return {std::move(messages)};
