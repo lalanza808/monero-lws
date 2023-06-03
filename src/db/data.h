@@ -74,7 +74,7 @@ namespace db
   struct output_id
   {
     //! \return Special ID for outputs not yet in a block.
-    static output_id txpool() noexcept
+    static constexpr output_id txpool() noexcept
     { return {0, std::numeric_limits<std::uint64_t>::max()}; }
 
     std::uint64_t high; //!< Amount on public chain; rct outputs are `0`
