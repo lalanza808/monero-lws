@@ -142,7 +142,7 @@ namespace cryptonote
     );
   }
 
-  static void read_bytes(wire::json_reader& source, transaction& self)
+  void read_bytes(wire::json_reader& source, transaction& self)
   {
     self.vin.reserve(default_inputs);
     self.vout.reserve(default_outputs);
