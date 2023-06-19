@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,69 +27,14 @@
 
 #pragma once
 
-#include <cstdint>
-#include <vector>
+#include "span.h" // monero/contrib/epee/include
+#include "wire/traits.h"
 
-#include "common/pod-class.h" // monero/src
-#include "wire/json/fwd.h"
-
-namespace crypto
+namespace wire
 {
-  POD_CLASS hash;
+  //! Enable span types for array output
+  template<typename T>
+  struct is_array<epee::span<T>>
+    : std::true_type
+  {};
 }
-
-namespace cryptonote
-{
-  class transaction;
-  void read_bytes(wire::json_reader& source, transaction& self);
-
-  namespace rpc
-  {
-    struct block_with_transactions;
-    struct tx_in_pool;
-  }
-}
-
-namespace lws
-{
-namespace rpc
-{
-  struct get_blocks_fast_request
-  {
-    get_blocks_fast_request() = delete;
-    std::vector<crypto::hash> block_ids;
-    std::uint64_t start_height;
-    bool prune;
-  };
-  struct get_blocks_fast_response
-  {
-    get_blocks_fast_response() = delete;
-    std::vector<cryptonote::rpc::block_with_transactions> blocks;
-    std::vector<std::vector<std::vector<std::uint64_t>>> output_indices;
-    std::uint64_t start_height;
-    std::uint64_t current_height;
-  };
-  struct get_blocks_fast
-  {
-    using request = get_blocks_fast_request;
-    using response = get_blocks_fast_response;
-  };
-  void read_bytes(wire::json_reader&, get_blocks_fast_response&);
-
-  struct get_transaction_pool_request
-  {
-    get_transaction_pool_request() = delete;
-  };
-  struct get_transaction_pool_response
-  {
-    get_transaction_pool_response() = delete;
-    std::vector<cryptonote::rpc::tx_in_pool> transactions;
-  };
-  struct get_transaction_pool
-  {
-    using request = get_transaction_pool_request;
-    using response = get_transaction_pool_response;
-  };
-  void read_bytes(wire::json_reader&, get_transaction_pool_response&);
-} // rpc
-} // lws
