@@ -1,4 +1,5 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2022, The Monero Project
+//
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -25,33 +26,15 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
+#include "wire/wrapper/variant.h"
 
-#include <type_traits>
-
-#include "crypto/crypto.h"   // monero/src
-#include "span.h"            // monero/contrib/include
-#include "ringct/rctTypes.h" // monero/src
-#include "wire/traits.h"
-
-namespace crypto
-{
-  template<typename R>
-  void read_bytes(R& source, crypto::secret_key& self)
-  {
-    source.binary(epee::as_mut_byte_span(unwrap(unwrap(self))));
-  }
-}
+#include <boost/core/demangle.hpp>
+#include "wire/error.h"
 
 namespace wire
 {
-  WIRE_DECLARE_BLOB(crypto::ec_scalar);
-  WIRE_DECLARE_BLOB(crypto::hash);
-  WIRE_DECLARE_BLOB(crypto::hash8);
-  WIRE_DECLARE_BLOB(crypto::key_derivation);
-  WIRE_DECLARE_BLOB(crypto::key_image);
-  WIRE_DECLARE_BLOB(crypto::public_key);
-  WIRE_DECLARE_BLOB(crypto::signature);
-  WIRE_DECLARE_BLOB(crypto::view_tag);
-  WIRE_DECLARE_BLOB(rct::key);
+  [[noreturn]] void throw_variant_exception(wire::error::schema type, const char* variant_name)
+  {
+    WIRE_DLOG_THROW(type, "error with variant type: " << boost::core::demangle(variant_name));
+  }
 }
