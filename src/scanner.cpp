@@ -58,7 +58,9 @@
 #include "rpc/json.h"
 #include "util/source_location.h"
 #include "util/transactions.h"
+#include "wire/adapted/span.h"
 #include "wire/json.h"
+#include "wire/msgpack.h"
 
 #include "serialization/json_object.h"
 
@@ -168,9 +170,15 @@ namespace lws
       if (uri.empty())
         uri = "/";
 
+      epee::byte_slice bytes{};
       const std::string& url = event.value.second.url;
-      const epee::byte_slice bytes = wire::json::to_bytes(event);
+      const std::error_code json_error = wire::json::to_bytes(bytes, event);
       const net::http::http_response_info* info = nullptr;
+      if (json_error)
+      {
+        MERROR("Failed to generate webhook JSON: " << json_error.message());
+        return;
+      }
 
       MINFO("Sending webhook to " << url);
       if (!client.invoke(uri, "POST", std::string{bytes.begin(), bytes.end()}, timeout, std::addressof(info), params))
@@ -205,6 +213,8 @@ namespace lws
 
       for (const db::webhook_tx_confirmation& event : events)
       {
+        if (event.value.second.url == "zmq")
+          continue;
         if (event.value.second.url.empty() || !net::parse_url(event.value.second.url, url))
         {
           MERROR("Bad URL for webhook event: " << event.value.second.url);
@@ -234,6 +244,20 @@ namespace lws
           MERROR("Unable to send webhook to " << event.value.second.url);
 
         client.disconnect();
+      }
+    }
+
+    void send_via_zmq(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events)
+    {
+      //! \TODO monitor XPUB to cull the serialization
+      if (!events.empty() && client.has_publish())
+      {
+        MINFO("Sending ZMQ-PUB topics json-full-hooks and msgpack-full-hooks");
+        expect<void> result = success();
+        if (!(result = client.publish<wire::json>("json-full-hooks:", events)))
+          MERROR("Failed to serialize+send json-full-hooks: " << result.error().message());
+        if (!(result = client.publish<wire::msgpack>("msgpack-full-hooks:", events)))
+          MERROR("Failed to serialize+send msgpack-full-hooks: " << result.error().message());
       }
     }
 
@@ -308,7 +332,10 @@ namespace lws
             return false;
           }
 
-          auto txpool = MONERO_UNWRAP(wire::json::from_bytes<rpc::json<rpc::get_transaction_pool>::response>(std::move(*resp)));
+          rpc::json<rpc::get_transaction_pool>::response txpool{};
+          const std::error_code err = wire::json::from_bytes(std::move(*resp), txpool);
+          if (err)
+            MONERO_THROW(err, "Invalid json-rpc");
           for (auto& tx : txpool.result.transactions)
             txpool_.emplace(get_transaction_prefix_hash(tx.tx), tx.tx_hash);
         }
@@ -326,6 +353,7 @@ namespace lws
             events.pop_back(); //cannot compute tx_hash
         }
         send_via_http(epee::to_span(events), std::chrono::seconds{5}, verify_mode_);
+        send_via_zmq(client_, epee::to_span(events));
         return true;
       }
     };
@@ -593,7 +621,12 @@ namespace lws
             MONERO_THROW(resp.error(), "Failed to retrieve blocks from daemon");
           }
 
-          auto fetched = MONERO_UNWRAP(wire::json::from_bytes<rpc::json<rpc::get_blocks_fast>::response>(std::move(*resp)));
+          rpc::json<rpc::get_blocks_fast>::response fetched{};
+          {
+            const std::error_code error = wire::json::from_bytes(std::move(*resp), fetched);
+            if (error)
+              throw std::system_error{error};
+          }
           if (fetched.result.blocks.empty())
             throw std::runtime_error{"Daemon unexpectedly returned zero blocks"};
 
@@ -727,6 +760,7 @@ namespace lws
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
           send_via_http(epee::to_span(updated->second), std::chrono::seconds{5}, webhook_verify);
+          send_via_zmq(client, epee::to_span(updated->second));
           if (updated->first != users.size())
           {
             MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");

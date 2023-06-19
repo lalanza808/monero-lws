@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,31 +27,14 @@
 
 #pragma once
 
-#include <type_traits>
-
-#include "crypto/crypto.h"   // monero/src
-#include "span.h"            // monero/contrib/include
-#include "ringct/rctTypes.h" // monero/src
+#include "span.h" // monero/contrib/epee/include
 #include "wire/traits.h"
-
-namespace crypto
-{
-  template<typename R>
-  void read_bytes(R& source, crypto::secret_key& self)
-  {
-    source.binary(epee::as_mut_byte_span(unwrap(unwrap(self))));
-  }
-}
 
 namespace wire
 {
-  WIRE_DECLARE_BLOB(crypto::ec_scalar);
-  WIRE_DECLARE_BLOB(crypto::hash);
-  WIRE_DECLARE_BLOB(crypto::hash8);
-  WIRE_DECLARE_BLOB(crypto::key_derivation);
-  WIRE_DECLARE_BLOB(crypto::key_image);
-  WIRE_DECLARE_BLOB(crypto::public_key);
-  WIRE_DECLARE_BLOB(crypto::signature);
-  WIRE_DECLARE_BLOB(crypto::view_tag);
-  WIRE_DECLARE_BLOB(rct::key);
+  //! Enable span types for array output
+  template<typename T>
+  struct is_array<epee::span<T>>
+    : std::true_type
+  {};
 }

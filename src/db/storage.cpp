@@ -60,6 +60,8 @@
 #include "wire/filters.h"
 #include "wire/json.h"
 #include "wire/vector.h"
+#include "wire/wrapper/array.h"
+#include "wire/wrappers_impl.h"
 
 namespace lws
 {
@@ -869,7 +871,7 @@ namespace db
   {
     wire::object(dest,
       wire::field("scan_height", self.first),
-      wire::field("accounts", wire::as_array(std::move(self.second)))
+      wire::field("accounts", wire::array(std::move(self.second)))
     );
   }
 
@@ -962,10 +964,10 @@ namespace db
     const wire::as_array_filter<toggle_key_output> toggle_keys_filter{{show_keys}};
     wire::json_stream_writer json_stream{out};
     wire::object(json_stream,
-      wire::field(blocks.name, wire::as_array(reverse(*blocks_partial))),
+      wire::field(blocks.name, wire::array(reverse(*blocks_partial))),
       wire::field(accounts.name, wire::as_object(accounts_stream->make_range(), wire::enum_as_string, toggle_keys_filter)),
       wire::field(accounts_by_address.name, wire::as_object(transform(accounts_ba_stream->make_range(), address_as_key))),
-      wire::field(accounts_by_height.name, wire::as_array(accounts_bh_stream->make_range())),
+      wire::field(accounts_by_height.name, wire::array(accounts_bh_stream->make_range())),
       wire::field(outputs.name, wire::as_object(outputs_stream->make_range(), wire::as_integer, wire::as_array)),
       wire::field(spends.name, wire::as_object(spends_stream->make_range(), wire::as_integer, wire::as_array)),
       wire::field(images.name, wire::as_object(images_stream->make_range(), output_id_key{}, wire::as_array)),
@@ -2190,6 +2192,7 @@ namespace db
 
   expect<void> storage::add_webhook(const webhook_type type, const account_address& address, const webhook_value& event)
   {
+    if (event.second.url != "zmq")
     {
       epee::net_utils::http::url_content url{};
       if (event.second.url.empty() || !epee::net_utils::parse_url(event.second.url, url))
