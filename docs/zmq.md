@@ -24,63 +24,68 @@ that lack a payment_id`.
 Example of the "raw" output from ZMQ-SUB side:
 
 ```json
-json-full-hooks:[
-  {
-    "event": "tx-confirmation",
-    "payment_id": "9bc1a59b34253896",
-    "token": "12345",
-    "confirmations": 4,
-    "event_id": "4dc201838af54dfe88686bea7e2b599f",
-    "tx_info": {
-      "id": {
-        "high": 0,
-        "low": 5664688
-      },
-      "block": 2264293,
-      "index": 0,
-      "amount": 100000000000,
-      "timestamp": 1687110127,
-      "tx_hash": "40718409ed636a9ed25f6855704f22e09d04f1093bbfce9780cbc5550972fc9f",
-      "tx_prefix_hash": "20600af2f06c4854de96177d6e4c825d7dc59fb04eded2bab6c209557eb2a53c",
-      "tx_public": "018899ed5e8c1e61c6d7eec7398a29dcd04506d5c8ad94f22a4580a658a7e10a",
-      "rct_mask": "85fb4ae09147cf026119eab99879f3b9bd7bc8bbefdf6f782c24fe76cd322c03",
-      "payment_id": "9bc1a59b34253896",
-      "unlock_time": 0,
-      "mixin_count": 15,
-      "coinbase": false
+json-full-hooks:{
+  "index": 2,
+  "events": [
+    {
+      "event": "tx-confirmation",
+      "payment_id": "4f695d197f2a3c54",
+      "token": "single zmq wallet",
+      "confirmations": 1,
+      "event_id": "3894f98f5dd54af5857e4f8a961a4e57",
+      "tx_info": {
+        "id": {
+          "high": 0,
+          "low": 5666767
+        },
+        "block": 2265961,
+        "index": 0,
+        "amount": 100000000000,
+        "timestamp": 1687301600,
+        "tx_hash": "ef3187775584351cc5109de124b877bcc530fb3fdbf77895329dd447902cc566",
+        "tx_prefix_hash": "064884b8a8f903edcfebab830707ed44b633438b47c95a83320f4438b1b28626",
+        "tx_public": "54dce1a6eebafa2fdedcea5e373ef9de1c3d2737ae9f809e80958d1ba4590d74",
+        "rct_mask": "68459964f89d69b7a4b1e0a1a8a384cbc9a76363c8a6e99058d41906908bd005",
+        "payment_id": "4f695d197f2a3c54",
+        "unlock_time": 0,
+        "mixin_count": 15,
+        "coinbase": false
+      }
+    },
+    {
+      "event": "tx-confirmation",
+      "payment_id": "4f695d197f2a3c54",
+      "token": "single zmq wallet",
+      "confirmations": 1,
+      "event_id": "3894f98f5dd54af5857e4f8a961a4e57",
+      "tx_info": {
+        "id": {
+          "high": 0,
+          "low": 5666768
+        },
+        "block": 2265961,
+        "index": 1,
+        "amount": 3117324236131,
+        "timestamp": 1687301600,
+        "tx_hash": "ef3187775584351cc5109de124b877bcc530fb3fdbf77895329dd447902cc566",
+        "tx_prefix_hash": "064884b8a8f903edcfebab830707ed44b633438b47c95a83320f4438b1b28626",
+        "tx_public": "54dce1a6eebafa2fdedcea5e373ef9de1c3d2737ae9f809e80958d1ba4590d74",
+        "rct_mask": "4cdc4c4e340aacb4741ba20f9b0b859242ecdad2fcc251f71d81123a47db3400",
+        "payment_id": "4f695d197f2a3c54",
+        "unlock_time": 0,
+        "mixin_count": 15,
+        "coinbase": false
+      }
     }
-  },
-  {
-    "event": "tx-confirmation",
-    "payment_id": "9bc1a59b34253896",
-    "token": "12345",
-    "confirmations": 4,
-    "event_id": "615171e477464401a1a23cdb45b3b433",
-    "tx_info": {
-      "id": {
-        "high": 0,
-        "low": 5664688
-      },
-      "block": 2264293,
-      "index": 0,
-      "amount": 100000000000,
-      "timestamp": 1687110127,
-      "tx_hash": "40718409ed636a9ed25f6855704f22e09d04f1093bbfce9780cbc5550972fc9f",
-      "tx_prefix_hash": "20600af2f06c4854de96177d6e4c825d7dc59fb04eded2bab6c209557eb2a53c",
-      "tx_public": "018899ed5e8c1e61c6d7eec7398a29dcd04506d5c8ad94f22a4580a658a7e10a",
-      "rct_mask": "85fb4ae09147cf026119eab99879f3b9bd7bc8bbefdf6f782c24fe76cd322c03",
-      "payment_id": "9bc1a59b34253896",
-      "unlock_time": 0,
-      "mixin_count": 15,
-      "coinbase": false
-    }
-  }
-]
+  ]
+}
 ```
 
 Notice the `json-full-hooks:` prefix - this is required for the ZMQ PUB/SUB
 subscription model. The subscriber requests data from a certain "topic" where
 matching is done by string prefixes.
+
+> `index` is a counter used to detect dropped messages.
 
 > The `block` and `id` fields in the above example are NOT present when
 `confirmations == 0`.
