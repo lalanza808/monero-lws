@@ -80,12 +80,9 @@ namespace lmdb
       auto msgpack_bytes = lmdb::to_byte_span(value);
       msgpack_bytes.remove_prefix(sizeof(out.first));
 
-      msgpack_value_type second{};
-      const std::error_code error = wire::msgpack::from_bytes(epee::byte_slice{{msgpack_bytes}}, second);
+      const std::error_code error = wire::msgpack::from_bytes(epee::byte_slice{{msgpack_bytes}}, out.second);
       if (error)
         return error;
-      out.second = std::move(second);
-
       return out;
     }
     

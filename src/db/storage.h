@@ -52,6 +52,8 @@ namespace db
     MONERO_CURSOR(spends);
     MONERO_CURSOR(images);
     MONERO_CURSOR(requests);
+    MONERO_CURSOR(subaddress_ranges);
+    MONERO_CURSOR(subaddress_indexes);
 
     MONERO_CURSOR(blocks);
     MONERO_CURSOR(accounts_by_address);
@@ -132,6 +134,13 @@ namespace db
     //! \return A specific request from `address` of `type`.
     expect<request_info>
       get_request(request type, account_address const& address, cursor::requests cur = nullptr) noexcept;
+
+    //! \return All subaddresses activated for account `id`.
+    expect<std::vector<subaddress_dict>> get_subaddresses(account_id id, cursor::subaddress_ranges cur = nullptr) noexcept;
+
+    //! \return A specific subaddress index
+    expect<address_index>
+      find_subaddress(account_id id, crypto::public_key const& spend_public, cursor::subaddress_indexes& cur) noexcept;
 
     //! \return All webhook values associated with user `key` and `payment_id`.
     expect<std::vector<webhook_value>>
@@ -244,6 +253,24 @@ namespace db
       update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts);
 
     /*!
+      Adds subaddresses to an account. Upon success, an account will
+      immediately begin tracking them in the scanner.
+      
+      \param id of the account to associate new indexes
+      \param addresss of the account (needed to generate subaddress publc key)
+      \param view_key of the account (needed to generate subaddress public key)
+      \param subaddrs Range of subaddress indexes that need to be added to the
+        database. Indexes _may_ overlap with existing indexes.
+      \param max_subaddresses The maximum number of subaddresses allowed per
+        account.
+
+      \return The new ranges of subaddress indexes added to the database
+        (whereas `subaddrs` may overlap with existing indexes).
+      */
+    expect<std::vector<subaddress_dict>>
+      upsert_subaddresses(account_id id, const account_address& address, const crypto::secret_key& view_key, std::vector<subaddress_dict> subaddrs, std::uint32_t max_subaddresses);
+
+    /*!
       Add webhook to be tracked in the database. The webhook will "call"
       the specified URL with JSON/msgpack information when the event occurs.
      
@@ -264,7 +291,8 @@ namespace db
     expect<void> clear_webhooks(std::vector<boost::uuids::uuid> ids);
 
     //! `txn` must have come from a previous call on the same thread.
-    expect<storage_reader> start_read(lmdb::suspended_txn txn = nullptr) const;
+    expect<storage_reader> 
+      start_read(lmdb::suspended_txn txn = nullptr) const;
   };
 } // db
 } // lws

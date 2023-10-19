@@ -39,10 +39,14 @@ namespace db
   enum class block_id : std::uint64_t;
   enum extra : std::uint8_t;
   enum class extra_and_length : std::uint8_t;
+  enum class major_index : std::uint32_t;
+  enum class minor_index : std::uint32_t;
   enum class request : std::uint8_t;
+  enum class webhook_type : std::uint8_t; 
 
   struct account;
   struct account_address;
+  struct address_index;
   struct block_info;
   struct key_image;
   struct output;
@@ -50,7 +54,15 @@ namespace db
   struct request_info;
   struct spend;
   class storage;
+  struct subaddress_map;
   struct transaction_link;
   struct view_key;
+  struct webhook_data;
+  struct webhook_dupsort;
+  struct webhook_event;
+  struct webhook_key;
+  struct webhook_new_account;
+  struct webhook_output;
+  struct webhook_tx_confirmation;
 } // db
 } // lws
