@@ -2379,11 +2379,21 @@ namespace db
           out.back().second.push_back(minor);
       };
 
-      const auto check_max = [&subaddr_count, max_subaddr] (const std::size_t more) -> bool
+      const auto check_max_range = [&subaddr_count, max_subaddr] (const index_range& range) -> bool
       {
-        if (max_subaddr - subaddr_count < more)
+        const auto more = std::uint32_t(range[1]) - std::uint32_t(range[0]);
+        if (max_subaddr - subaddr_count <= more)
           return false;
-        subaddr_count += more;
+        subaddr_count += more + 1;
+        return true;
+      };
+      const auto check_max_ranges = [&check_max_range] (const index_ranges& ranges) -> bool
+      {
+        for (const auto& range : ranges)
+        {
+          if (!check_max_range(range))
+            return false;
+        }
         return true;
       };
 
@@ -2418,21 +2428,24 @@ namespace db
         {
           if (err != MDB_NOTFOUND)
             return {lmdb::error(err)};
-          if (!check_max(major_entry.second.size()))
+          if (!check_max_ranges(major_entry.second))
             return {error::max_subaddresses};
           out.push_back(major_entry);
           new_dict = std::move(major_entry.second);
         }
         else
         {
-          const auto old_value = MONERO_UNWRAP(subaddress_ranges.get_value(value));
+          new_dict = MONERO_UNWRAP(subaddress_ranges.get_value(value)).second;
           for (auto& minor_entry : major_entry.second)
           {
-            const auto old_loc = 
-              std::lower_bound(old_value.second.begin(), old_value.second.end(), minor_entry);
-            if (old_loc == old_value.second.end() || minor_entry[1] < old_loc->at(0))
+            bool append = false;
+            auto old_loc = 
+              std::lower_bound(new_dict.begin(), new_dict.end(), minor_entry);
+            if (old_loc != new_dict.begin() && (append = (old_loc - 1)->at(1) == 
+              append = (--old_loc)->at(1) == 
+            if (!append && (old_loc == new_dict.end() || minor_entry[1] < old_loc->at(0)))
             {
-              if (!check_max(minor_entry.size()))
+              if (!check_max_range(minor_entry))
                 return {error::max_subaddresses};
               add_out(major_entry.first, minor_entry);
               new_dict.push_back(minor_entry);
@@ -2441,20 +2454,22 @@ namespace db
             {
               const auto start = std::min(minor_entry[0], old_loc->at(0));
               const auto end = std::max(minor_entry[1], old_loc->at(1));
-              new_dict.push_back(index_range{start, end});
+              *old_loc = index_range{start, end};
               if (start < old_loc->at(0))
               {
                 const auto minor = std::uint32_t(old_loc->at(0)) - 1;
-                if (!check_max(minor - std::uint32_t(start)))
+                const index_range new_range{start, minor_index(minor)};
+                if (!check_max_range(new_range))
                   return {error::max_subaddresses};
-                add_out(major_entry.first, index_range{start, minor_index(minor)});
+                add_out(major_entry.first, new_range);
               }
               if (old_loc->at(1) < end)
               {
                 const auto minor = std::uint32_t(old_loc->at(1)) + 1;
-                if (!check_max(std::uint32_t(end) - minor))
+                const index_range new_range{minor_index(minor), end};
+                if (!check_max_range(new_range))
                   return {error::max_subaddresses};
-                add_out(major_entry.first, index_range{minor_index(minor), end});
+                add_out(major_entry.first, new_range);
               }
             }
           }
