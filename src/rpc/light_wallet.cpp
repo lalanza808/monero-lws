@@ -134,7 +134,8 @@ namespace
       wire::field("timestamp", iso_timestamp(self.data.first.timestamp)),
       wire::field("height", self.data.first.link.height),
       wire::field("spend_key_images", std::cref(self.data.second)),
-      wire::optional_field("rct", optional_rct)
+      wire::optional_field("rct", optional_rct),
+      wire::field("recipient", std::cref(self.data.first.recipient))
     );
   }
 
@@ -205,7 +206,8 @@ namespace lws
       wire::field("key_image", std::cref(self.possible_spend.image)),
       wire::field("tx_pub_key", std::cref(self.meta.tx_public)),
       wire::field("out_index", self.meta.index),
-      wire::field("mixin", self.possible_spend.mixin_count)
+      wire::field("mixin", self.possible_spend.mixin_count),
+      wire::field("sender", std::cref(self.possible_spend.sender))
     );
   }
 

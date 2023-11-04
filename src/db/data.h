@@ -141,6 +141,7 @@ namespace db
 
   //! Compatible with msgpack_table
   using subaddress_dict = std::pair<major_index, index_ranges>;
+  bool check_subaddress_dict(const subaddress_dict&);
   WIRE_DECLARE_OBJECT(subaddress_dict);
 
   //! A specific (sub)address index
@@ -371,6 +372,11 @@ namespace db
     account_address account;
   };
   void write_bytes(wire::writer&, const webhook_new_account&);
+
+  inline constexpr bool operator==(address_index const& left, address_index const& right) noexcept
+  {
+    return left.maj_i == right.maj_i && left.min_i == right.min_i;
+  }
 
   inline constexpr bool operator<(address_index const& left, address_index const& right) noexcept
   {

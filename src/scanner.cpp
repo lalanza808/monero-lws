@@ -304,6 +304,8 @@ namespace lws
       boost::optional<crypto::hash> prefix_hash;
       boost::optional<cryptonote::tx_extra_nonce> extra_nonce;
       std::pair<std::uint8_t, db::output::payment_id_> payment_id;
+      cryptonote::tx_extra_additional_pub_keys additional_tx_pub_keys;
+      std::vector<crypto::key_derivation> additional_derivations;
 
       {
         std::vector<cryptonote::tx_extra_field> extra;
@@ -321,6 +323,10 @@ namespace lws
         }
         else
           extra_nonce = boost::none;
+
+        // additional tx pub keys present when there are 3+ outputs in a tx involving subaddresses
+        if (reader.reader)
+          cryptonote::find_tx_extra_field_by_type(extra, additional_tx_pub_keys);
       } // destruct `extra` vector
 
       for (account& user : users)
@@ -331,6 +337,21 @@ namespace lws
         crypto::key_derivation derived;
         if (!crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), derived))
           continue; // to next user
+
+        if (reader.reader && additional_tx_pub_keys.data.size() == tx.vout.size())
+        {
+          additional_derivations.resize(tx.vout.size());
+          std::size_t index = -1;
+          for (auto const& out: tx.vout)
+          {
+            ++index;
+            if (!crypto::wallet::generate_key_derivation(additional_tx_pub_keys.data[index], user.view_key(), additional_derivations[index]))
+            {
+              additional_derivations.clear();
+              break; // vout loop
+            }
+          }
+        }
 
         db::extra ext{};
         std::uint32_t mixin = 0;
@@ -385,16 +406,28 @@ namespace lws
 
           boost::optional<crypto::view_tag> view_tag_opt =
             cryptonote::get_output_view_tag(out);
-          if (!cryptonote::out_can_be_to_acc(view_tag_opt, derived, index))
+
+          const bool found_tag =
+            (!additional_derivations.empty() && cryptonote::out_can_be_to_acc(view_tag_opt, additional_derivations.at(index), index)) ||
+            cryptonote::out_can_be_to_acc(view_tag_opt, derived, index); 
+
+          if (!found_tag)
             continue; // to next output
 
           crypto::public_key derived_pub;
-          if (!crypto::wallet::derive_subaddress_public_key(out_pub_key, derived, index, derived_pub))
+          const bool found_pub =
+            (!additional_derivations.empty() && crypto::wallet::derive_subaddress_public_key(out_pub_key, additional_derivations.at(index), index, derived_pub)) ||
+            crypto::wallet::derive_subaddress_public_key(out_pub_key, derived, index, derived_pub);
+
+          if (!found_pub)
             continue; // to next output
 
           db::address_index account_index{db::major_index::primary, db::minor_index::primary};
-          if (user.spend_public() != derived_pub && reader.reader)
+          if (user.spend_public() != derived_pub)
           {
+            if (!reader.reader)
+              continue; // to next output
+
             const expect<db::address_index> match =
               reader.reader->find_subaddress(user.id(), derived_pub, reader.cur);
             if (!match)
@@ -416,9 +449,11 @@ namespace lws
           rct::key mask = rct::identity();
           if (!amount && !(ext & db::coinbase_output) && 1 < tx.version)
           {
+            const crypto::key_derivation& active_pub =
+              additional_derivations.empty() ? derived : additional_derivations.at(index);
             const bool bulletproof2 = (rct::RCTTypeBulletproof2 <= tx.rct_signatures.type);
             const auto decrypted = lws::decode_amount(
-              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), derived, index, bulletproof2
+              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), active_pub, index, bulletproof2
             );
             if (!decrypted)
             {
@@ -521,6 +556,7 @@ namespace lws
         rpc::client client{std::move(data->client)};
         db::storage disk{std::move(data->disk)};
         std::vector<lws::account> users{std::move(data->users)};
+        const options opts = std::move(data->opts);
 
         assert(!users.empty());
         assert(std::is_sorted(users.begin(), users.end(), by_height{}));
@@ -607,7 +643,7 @@ namespace lws
               {
                 if (message->first != rpc::client::topic::txpool)
                   break; // inner for loop
-                scan_transactions(std::move(message->second), epee::to_mut_span(users), disk, client, data->opts);
+                scan_transactions(std::move(message->second), epee::to_mut_span(users), disk, client, opts);
               }
 
               for ( ; message != new_pubs->end(); ++message)
@@ -644,7 +680,7 @@ namespace lws
           else
             fetched->start_height = 0;
 
-          subaddress_reader reader{disk, data->opts.enable_subaddresses};
+          subaddress_reader reader{disk, opts.enable_subaddresses};
           for (auto block_data : boost::combine(blocks, indices))
           {
             ++(fetched->start_height);
@@ -708,7 +744,7 @@ namespace lws
           }
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
-          send_payment_hook(client, epee::to_span(updated->second), data->opts.webhook_verify);
+          send_payment_hook(client, epee::to_span(updated->second), opts.webhook_verify);
           if (updated->first != users.size())
           {
             MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");

@@ -85,33 +85,41 @@ namespace db
         wire::field<1>("value", std::ref(self.second))
       );
     }
+  }
 
-    void check_subaddress_dict(const subaddress_dict& self)
+  bool check_subaddress_dict(const subaddress_dict& self)
+  {
+    bool is_first = true;
+    minor_index last = minor_index::primary;
+    for (const auto& elem : self.second)
     {
-      bool is_first = true;
-      minor_index last = minor_index::primary;
-      for (const auto& elem : self.second)
+      if (elem[1] < elem[0])
       {
-        if (elem[1] < elem[0])
-          WIRE_DLOG_THROW(wire::error::schema::array, "Invalid subaddress range (last before first)");
-        if (elem[0] <= last && !is_first)
-          WIRE_DLOG_THROW(wire::error::schema::array, "Invalid subaddress range (duplicated)");
-        is_first = false;
-        last = elem[1];
+        MERROR("Invalid subaddress_range (last before first");
+        return false;
       }
+      if (std::uint32_t(elem[0]) <= std::uint64_t(last) + 1 && !is_first)
+      {
+        MERROR("Invalid subaddress_range (overlapping with previous)");
+        return false;
+      }
+      is_first = false;
+      last = elem[1];
     }
+    return true;
   }
   void read_bytes(wire::reader& source, subaddress_dict& dest)
   {
     map_subaddress_dict(source, dest);
-    check_subaddress_dict(dest);
+    if (!check_subaddress_dict(dest))
+      WIRE_DLOG_THROW_(wire::error::schema::array);
   }
   void write_bytes(wire::writer& dest, const subaddress_dict& source)
   { 
-    check_subaddress_dict(source);
+    if (!check_subaddress_dict(source))
+      WIRE_DLOG_THROW_(wire::error::schema::array);
     map_subaddress_dict(dest, source);
   }
-
 
   namespace
   {

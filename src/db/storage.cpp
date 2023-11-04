@@ -873,6 +873,7 @@ namespace db
     MONERO_CHECK(check_cursor(*txn, db->tables.subaddress_indexes, cur));
     MDB_val key = lmdb::to_val(id);
     MDB_val value = lmdb::to_val(address);
+
     MONERO_LMDB_CHECK(mdb_cursor_get(cur.get(), &key, &value, MDB_GET_BOTH));
     return subaddress_indexes.get_value<MONERO_FIELD(subaddress_map, index)>(value);
   }
@@ -1014,11 +1015,10 @@ namespace db
   static void write_bytes(wire::json_writer& dest, const std::pair<lws::db::account_id, std::vector<std::pair<lws::db::major_index, std::vector<std::array<lws::db::minor_index, 2>>>>>& self)
   {
     wire::object(dest,
-      wire::field("account_id", std::cref(self.first)),
+      wire::field("id", std::cref(self.first)),
       wire::field("subaddress_indexes", std::cref(self.second))
     );
   }
-
 
   expect<void> storage_reader::json_debug(std::ostream& out, bool show_keys)
   {
@@ -1053,8 +1053,8 @@ namespace db
     MONERO_CHECK(check_cursor(*txn, db->tables.requests, requests_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.webhooks, webhooks_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.events, events_cur));
-    MONERO_CHECK(check_cursor(*txn, db->tables.subaddress_ranges, ranges_cur));
-    MONERO_CHECK(check_cursor(*txn, db->tables.subaddress_indexes, indexes_cur));
+ //   MONERO_CHECK(check_cursor(*txn, db->tables.subaddress_ranges, ranges_cur));
+ //   MONERO_CHECK(check_cursor(*txn, db->tables.subaddress_indexes, indexes_cur));
 
     auto blocks_partial =
       get_blocks<boost::container::static_vector<block_info, 12>>(*curs.blocks_cur, 0);
@@ -1092,7 +1092,7 @@ namespace db
     auto requests_stream = requests.get_key_stream(std::move(requests_cur));
     if (!requests_stream)
       return requests_stream.error();
-
+/*
     const auto ranges_data = subaddress_ranges.get_all(*ranges_cur);
     if (!ranges_data)
         return ranges_data.error();
@@ -1100,7 +1100,7 @@ namespace db
     auto indexes_stream = subaddress_indexes.get_key_stream(std::move(indexes_cur));
     if (!indexes_stream)
       return indexes_stream.error();
-
+*/
     // This list should be smaller ... ?
     const auto webhooks_data = webhooks.get_all(*webhooks_cur);
     if (!webhooks_data)
@@ -1121,9 +1121,9 @@ namespace db
       wire::field(spends.name, wire::as_object(spends_stream->make_range(), wire::as_integer, wire::as_array)),
       wire::field(images.name, wire::as_object(images_stream->make_range(), output_id_key{}, wire::as_array)),
       wire::field(requests.name, wire::as_object(requests_stream->make_range(), wire::enum_as_string, toggle_keys_filter)),
-      wire::field(subaddress_ranges.name, std::cref(*ranges_data)),
+/*      wire::field(subaddress_ranges.name, std::cref(*ranges_data)),
       wire::field(subaddress_indexes.name, wire::as_object(indexes_stream->make_range(), wire::as_integer, wire::as_array)),
-      wire::field(webhooks.name, std::cref(*webhooks_data)),
+  */    wire::field(webhooks.name, std::cref(*webhooks_data)),
       wire::field(events_by_account_id.name, wire::as_object(events_stream->make_range(), wire::as_integer, wire::as_array))
     );
     json_stream.finish();
@@ -2360,6 +2360,21 @@ namespace db
     });
   }
 
+  namespace
+  {
+    struct by_range_start
+    {
+      constexpr bool operator()(const index_range& left, const index_range& right) const noexcept
+      { return left[0] < right[0]; }
+    };
+
+    struct by_range_end
+    {
+      constexpr bool operator()(const index_range& left, const index_range& right) const noexcept
+      { return left[1] < right[1]; }
+    };
+  }
+
   expect<std::vector<subaddress_dict>>
   storage::upsert_subaddresses(const account_id id, const account_address& address, const crypto::secret_key& view_key, std::vector<subaddress_dict> subaddrs, const std::uint32_t max_subaddr)
   {
@@ -2421,6 +2436,11 @@ namespace db
       for (auto& major_entry : subaddrs)
       {
         new_dict.clear();
+        if (!check_subaddress_dict(major_entry))
+        {
+          MERROR("Invalid subaddress_dict given to storage::upsert_subaddrs");
+          return {wire::error::schema::array};
+        }
 
         value = lmdb::to_val(major_entry.first);
         err = mdb_cursor_get(ranges_cur.get(), &key, &value, MDB_GET_BOTH);
@@ -2433,45 +2453,66 @@ namespace db
           out.push_back(major_entry);
           new_dict = std::move(major_entry.second);
         }
-        else
+        else // merge new minor index ranges with old
         {
-          new_dict = MONERO_UNWRAP(subaddress_ranges.get_value(value)).second;
-          for (auto& minor_entry : major_entry.second)
+          auto old_dict = subaddress_ranges.get_value(value);
+          if (!old_dict)
+            return old_dict.error();
+
+          auto& old_range = old_dict->second;
+          const auto& new_range = major_entry.second;
+
+          auto old_loc = old_range.begin();
+          auto new_loc = new_range.begin();
+          for ( ; old_loc != old_range.end() && new_loc != new_range.end(); )
           {
-            bool append = false;
-            auto old_loc = 
-              std::lower_bound(new_dict.begin(), new_dict.end(), minor_entry);
-            if (old_loc != new_dict.begin() && (append = (old_loc - 1)->at(1) == 
-              append = (--old_loc)->at(1) == 
-            if (!append && (old_loc == new_dict.end() || minor_entry[1] < old_loc->at(0)))
-            {
-              if (!check_max_range(minor_entry))
+            if (std::uint64_t(new_loc->at(1)) + 1 < std::uint32_t(old_loc->at(0)))
+            { // new has no overlap with existing
+              if (!check_max_range(*new_loc))
                 return {error::max_subaddresses};
-              add_out(major_entry.first, minor_entry);
-              new_dict.push_back(minor_entry);
+
+              new_dict.push_back(*new_loc);
+              add_out(major_entry.first, *new_loc);
+              ++new_loc;
             }
-            else
+            else if (std::uint64_t(old_loc->at(1)) + 1 < std::uint32_t(new_loc->at(0)))
+            { // existing has no overlap with new
+              new_dict.push_back(*old_loc);
+              ++old_loc;
+            }
+            else if (old_loc->at(0) <= new_loc->at(0) && new_loc->at(1) <= old_loc->at(1))
+            { // new is completely within existing
+              ++new_loc;
+            }
+            else // new overlap at beginning, end, or both
             {
-              const auto start = std::min(minor_entry[0], old_loc->at(0));
-              const auto end = std::max(minor_entry[1], old_loc->at(1));
-              *old_loc = index_range{start, end};
-              if (start < old_loc->at(0))
-              {
-                const auto minor = std::uint32_t(old_loc->at(0)) - 1;
-                const index_range new_range{start, minor_index(minor)};
+              if (new_loc->at(0) < old_loc->at(0))
+              { // overlap at beginning
+                const index_range new_range{new_loc->at(0), minor_index(std::uint32_t(old_loc->at(0)) - 1)};
                 if (!check_max_range(new_range))
                   return {error::max_subaddresses};
                 add_out(major_entry.first, new_range);
+                old_loc->at(0) = new_loc->at(0);
               }
-              if (old_loc->at(1) < end)
-              {
-                const auto minor = std::uint32_t(old_loc->at(1)) + 1;
-                const index_range new_range{minor_index(minor), end};
+              if (old_loc->at(1) < new_loc->at(1))
+              { // overlap at end
+                const index_range new_range{minor_index(std::uint32_t(old_loc->at(1)) + 1), new_loc->at(1)};
                 if (!check_max_range(new_range))
                   return {error::max_subaddresses};
                 add_out(major_entry.first, new_range);
+                old_loc->at(1) = new_loc->at(1);
               }
+              ++new_loc;
             }
+          }
+
+          std::copy(old_loc, old_range.end(), std::back_inserter(new_dict));
+          for ( ; new_loc != new_range.end(); ++new_loc)
+          {
+            if (!check_max_range(*new_loc))
+              return {error::max_subaddresses};
+            new_dict.push_back(*new_loc);
+            add_out(major_entry.first, *new_loc);
           }
         }
 
@@ -2484,13 +2525,16 @@ namespace db
             new_value.subaddress = new_value.index.get_spend_public(address, view_key);
 
             value = lmdb::to_val(new_value);
+
             MONERO_LMDB_CHECK(mdb_cursor_put(indexes_cur.get(), &key, &value, 0));
           }
         }
 
-        const epee::byte_slice value_bytes =
+        const expect<epee::byte_slice> value_bytes =
           subaddress_ranges.make_value(major_entry.first, new_dict);
-        value = MDB_val{value_bytes.size(), const_cast<void*>(static_cast<const void*>(value_bytes.data()))};
+        if (!value_bytes)
+          return value_bytes.error();
+        value = MDB_val{value_bytes->size(), const_cast<void*>(static_cast<const void*>(value_bytes->data()))};
         MONERO_LMDB_CHECK(mdb_cursor_put(ranges_cur.get(), &key, &value, 0));
       }
 
@@ -2536,8 +2580,10 @@ namespace db
         return {error::bad_webhook};
 
       lmkey = lmdb::to_val(key);
-      const epee::byte_slice value = webhooks.make_value(event.first, event.second);
-      lmvalue = MDB_val{value.size(), const_cast<void*>(static_cast<const void*>(value.data()))};
+      const expect<epee::byte_slice> value = webhooks.make_value(event.first, event.second);
+      if (!value)
+        return value.error();
+      lmvalue = MDB_val{value->size(), const_cast<void*>(static_cast<const void*>(value->data()))};
       MONERO_LMDB_CHECK(mdb_cursor_put(webhooks_cur.get(), &lmkey, &lmvalue, 0));
       return success();
     });
