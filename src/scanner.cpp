@@ -414,30 +414,50 @@ namespace lws
           if (!found_tag)
             continue; // to next output
 
-          crypto::public_key derived_pub;
-          const bool found_pub =
-            (!additional_derivations.empty() && crypto::wallet::derive_subaddress_public_key(out_pub_key, additional_derivations.at(index), index, derived_pub)) ||
-            crypto::wallet::derive_subaddress_public_key(out_pub_key, derived, index, derived_pub);
+          bool found_pub = false;
+          db::address_index account_index{db::major_index::primary, db::minor_index::primary};
+          crypto::key_derivation active_derived;
+
+          // inspect the additional and traditional keys
+          for (std::size_t attempt = 0; attempt < 2; ++attempt)
+          {
+            if (attempt == 0)
+              active_derived = derived;
+            else if (!additional_derivations.empty())
+              active_derived = additional_derivations.at(index);
+            else
+              break; // inspection loop
+
+            crypto::public_key derived_pub;
+            if (!crypto::wallet::derive_subaddress_public_key(out_pub_key, active_derived, index, derived_pub))
+              continue; // to next available active_derived
+
+            if (user.spend_public() != derived_pub)
+            {
+              if (!reader.reader)
+                continue; // to next available active_derived
+
+              const expect<db::address_index> match =
+                reader.reader->find_subaddress(user.id(), derived_pub, reader.cur);
+              if (!match)
+              {
+                if (match != lmdb::error(MDB_NOTFOUND))
+                  MERROR("Failure when doing subaddress search: " << match.error().message());
+                continue; // to next available active_derived
+              }
+              found_pub = true;
+              account_index = *match;
+              break; // additional_derivations loop
+            }
+            else
+            {
+              found_pub = true;
+              break; // additional_derivations loop
+            }
+          }
 
           if (!found_pub)
             continue; // to next output
-
-          db::address_index account_index{db::major_index::primary, db::minor_index::primary};
-          if (user.spend_public() != derived_pub)
-          {
-            if (!reader.reader)
-              continue; // to next output
-
-            const expect<db::address_index> match =
-              reader.reader->find_subaddress(user.id(), derived_pub, reader.cur);
-            if (!match)
-            {
-              if (match != lmdb::error(MDB_NOTFOUND))
-                MERROR("Failure when doing subaddress search: " << match.error().message());
-              continue; // to next output
-            }
-            account_index = *match;
-          }
 
           if (!prefix_hash)
           {
@@ -449,11 +469,9 @@ namespace lws
           rct::key mask = rct::identity();
           if (!amount && !(ext & db::coinbase_output) && 1 < tx.version)
           {
-            const crypto::key_derivation& active_pub =
-              additional_derivations.empty() ? derived : additional_derivations.at(index);
             const bool bulletproof2 = (rct::RCTTypeBulletproof2 <= tx.rct_signatures.type);
             const auto decrypted = lws::decode_amount(
-              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), active_pub, index, bulletproof2
+              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), active_derived, index, bulletproof2
             );
             if (!decrypted)
             {
@@ -469,10 +487,8 @@ namespace lws
           {
             if (!payment_id.first && cryptonote::get_encrypted_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.short_))
             {
-              const crypto::key_derivation& active_pub =
-                additional_derivations.empty() ? derived : additional_derivations.at(index);
               payment_id.first = sizeof(crypto::hash8);
-              lws::decrypt_payment_id(payment_id.second.short_, active_pub);
+              lws::decrypt_payment_id(payment_id.second.short_, active_derived);
             }
           }
 
