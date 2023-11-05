@@ -356,6 +356,7 @@ namespace lws
       WIRE_OPTIONAL_FIELD(n_min),
       WIRE_OPTIONAL_FIELD(get_all)
     );
+    convert_address(address, self.creds.address);
   }
 
   void rpc::read_bytes(wire::json_reader& source, submit_raw_tx_request& self)

@@ -1053,8 +1053,8 @@ namespace db
     MONERO_CHECK(check_cursor(*txn, db->tables.requests, requests_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.webhooks, webhooks_cur));
     MONERO_CHECK(check_cursor(*txn, db->tables.events, events_cur));
- //   MONERO_CHECK(check_cursor(*txn, db->tables.subaddress_ranges, ranges_cur));
- //   MONERO_CHECK(check_cursor(*txn, db->tables.subaddress_indexes, indexes_cur));
+    MONERO_CHECK(check_cursor(*txn, db->tables.subaddress_ranges, ranges_cur));
+    MONERO_CHECK(check_cursor(*txn, db->tables.subaddress_indexes, indexes_cur));
 
     auto blocks_partial =
       get_blocks<boost::container::static_vector<block_info, 12>>(*curs.blocks_cur, 0);
@@ -1092,7 +1092,7 @@ namespace db
     auto requests_stream = requests.get_key_stream(std::move(requests_cur));
     if (!requests_stream)
       return requests_stream.error();
-/*
+
     const auto ranges_data = subaddress_ranges.get_all(*ranges_cur);
     if (!ranges_data)
         return ranges_data.error();
@@ -1100,7 +1100,7 @@ namespace db
     auto indexes_stream = subaddress_indexes.get_key_stream(std::move(indexes_cur));
     if (!indexes_stream)
       return indexes_stream.error();
-*/
+
     // This list should be smaller ... ?
     const auto webhooks_data = webhooks.get_all(*webhooks_cur);
     if (!webhooks_data)
@@ -1121,9 +1121,9 @@ namespace db
       wire::field(spends.name, wire::as_object(spends_stream->make_range(), wire::as_integer, wire::as_array)),
       wire::field(images.name, wire::as_object(images_stream->make_range(), output_id_key{}, wire::as_array)),
       wire::field(requests.name, wire::as_object(requests_stream->make_range(), wire::enum_as_string, toggle_keys_filter)),
-/*      wire::field(subaddress_ranges.name, std::cref(*ranges_data)),
+      wire::field(subaddress_ranges.name, std::cref(*ranges_data)),
       wire::field(subaddress_indexes.name, wire::as_object(indexes_stream->make_range(), wire::as_integer, wire::as_array)),
-  */    wire::field(webhooks.name, std::cref(*webhooks_data)),
+      wire::field(webhooks.name, std::cref(*webhooks_data)),
       wire::field(events_by_account_id.name, wire::as_object(events_stream->make_range(), wire::as_integer, wire::as_array))
     );
     json_stream.finish();

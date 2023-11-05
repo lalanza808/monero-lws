@@ -469,8 +469,10 @@ namespace lws
           {
             if (!payment_id.first && cryptonote::get_encrypted_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.short_))
             {
+              const crypto::key_derivation& active_pub =
+                additional_derivations.empty() ? derived : additional_derivations.at(index);
               payment_id.first = sizeof(crypto::hash8);
-              lws::decrypt_payment_id(payment_id.second.short_, derived);
+              lws::decrypt_payment_id(payment_id.second.short_, active_pub);
             }
           }
 
