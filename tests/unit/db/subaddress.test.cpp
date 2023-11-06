@@ -366,6 +366,44 @@ LWS_CASE("db::storage::upsert_subaddresses")
       EXPECT(fetched->at(0).second[1][1] == lws::db::minor_index(200));
     }
 
+    SECTION("Upsert Encapsulated")
+    {
+      std::vector<lws::db::subaddress_dict> subs{};
+      subs.emplace_back(
+        lws::db::major_index(0),
+        lws::db::index_ranges{lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(200)}}
+      );
+      auto result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 200);
+      EXPECT(result.has_value());
+      EXPECT(result->size() == 1);
+      EXPECT(result->at(0).first == lws::db::major_index(0));
+      EXPECT(result->at(0).second.size() == 1);
+      EXPECT(result->at(0).second[0][0] == lws::db::minor_index(1));
+      EXPECT(result->at(0).second[0][1] == lws::db::minor_index(200));
+
+      {
+        auto reader = MONERO_UNWRAP(db.start_read());
+        check_address_map(lest_env, reader, user, subs);
+      }
+
+      subs.back().second =
+        lws::db::index_ranges{lws::db::index_range{lws::db::minor_index(5), lws::db::minor_index(99)}};
+      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 300);
+      EXPECT(result.has_value());
+      EXPECT(result->size() == 0);
+
+      auto reader = MONERO_UNWRAP(db.start_read());
+      check_address_map(lest_env, reader, user, subs);
+      const auto fetched = reader.get_subaddresses(lws::db::account_id(1));
+      EXPECT(fetched.has_value());
+      EXPECT(fetched->size() == 1);
+      EXPECT(fetched->at(0).first == lws::db::major_index(0));
+      EXPECT(fetched->at(0).second.size() == 1);
+      EXPECT(fetched->at(0).second[0][0] == lws::db::minor_index(1));
+      EXPECT(fetched->at(0).second[0][1] == lws::db::minor_index(200));
+    }
+
+
     SECTION("Bad subaddress_dict")
     {
       std::vector<lws::db::subaddress_dict> subs{};

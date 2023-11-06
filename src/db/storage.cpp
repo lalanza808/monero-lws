@@ -2360,21 +2360,6 @@ namespace db
     });
   }
 
-  namespace
-  {
-    struct by_range_start
-    {
-      constexpr bool operator()(const index_range& left, const index_range& right) const noexcept
-      { return left[0] < right[0]; }
-    };
-
-    struct by_range_end
-    {
-      constexpr bool operator()(const index_range& left, const index_range& right) const noexcept
-      { return left[1] < right[1]; }
-    };
-  }
-
   expect<std::vector<subaddress_dict>>
   storage::upsert_subaddresses(const account_id id, const account_address& address, const crypto::secret_key& view_key, std::vector<subaddress_dict> subaddrs, const std::uint32_t max_subaddr)
   {
