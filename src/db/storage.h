@@ -291,8 +291,7 @@ namespace db
     expect<void> clear_webhooks(std::vector<boost::uuids::uuid> ids);
 
     //! `txn` must have come from a previous call on the same thread.
-    expect<storage_reader> 
-      start_read(lmdb::suspended_txn txn = nullptr) const;
+    expect<storage_reader> start_read(lmdb::suspended_txn txn = nullptr) const;
   };
 } // db
 } // lws
