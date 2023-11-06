@@ -762,8 +762,6 @@ namespace lws
       {
         if (!options.max_subaddresses)
           return {lws::error::max_subaddresses};
-        if (!key_check(req.creds))
-          return {lws::error::bad_view_key};
 
         db::account_id id = db::account_id::invalid;
         {
