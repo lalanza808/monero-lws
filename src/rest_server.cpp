@@ -491,8 +491,6 @@ namespace lws
 
       static expect<response> handle(request const& req, db::storage disk, rpc::client const&, runtime_options const& options)
       {
-        if (!options.max_subaddresses)
-          return {lws::error::max_subaddresses};
         auto user = open_account(req, std::move(disk));
         if (!user)
           return user.error();
