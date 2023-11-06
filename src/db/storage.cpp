@@ -104,6 +104,7 @@ namespace db
       "padding in output"
     );
 
+    //! Original db value, with no subaddress
     struct spend
     {
       transaction_link link;    //!< Orders and links `spend` to `output`.
@@ -122,7 +123,7 @@ namespace db
 
   namespace v1
   {
-    //! Orignal DB value, with no txn fee
+    //! Second DB value, with no subaddress
     struct output
     {
       transaction_link link;        //! Orders and links `output` to `spend`s.
